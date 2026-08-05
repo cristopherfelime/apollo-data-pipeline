@@ -1,0 +1,6 @@
+# some default files
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv

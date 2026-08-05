@@ -1,0 +1,49 @@
+# docker compose thing
+# used for running applications/platforms that requires multiple containers to run
+
+services:
+  # postgresql container
+  db:
+    image: postgres:16
+    container_name: postgres
+    ports:
+      # host:container port mapping, so that we can access the container from host
+      # takes in value of POSTGRES_PORT from .env file
+      - ${POSTGRES_PORT}:5432
+    volumes:
+      # persistent volume, so that data is not lost when container is recreated
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      # environment variables to be set for the postgres container
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+
+  # apache kafka container
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka_broker1
+    ports:
+      - ${KAFKA_PORT}:${KAFKA_PORT}
+    environment:
+      # note: INTERNAL for high speed inter-container communication
+      # note: EXTERNAL for client/external-facing connections
+      # note: CONTROLLER for controller-only node communication
+      KAFKA_NODE_ID: 1 # kafka node/broker id 1 for this cluster
+      KAFKA_PROCESS_ROLES: "broker,controller" # fulfills both data handling and cluster management control
+      KAFKA_LISTENERS: "INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:${KAFKA_PORT},CONTROLLER://0.0.0.0:${KAFKA_CONTROLLER_PORT}" # binds kafka to all available network interfaces with 0.0.0.0 (including localhost and the container itself) for internal traffic on port 29092, client traffic on port 9092, and managament/controller traffic on port 9093
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka_broker1:29092,EXTERNAL://${KAFKA_HOST}:${KAFKA_PORT}" # IMPORTANT: this tells kafka what addresses to give back to clients so that clients also know where to connect back to the broker: "to talk to me for future read/write operations. if you're an external client, contact me at: localhost at port 9092. if youre a fellow container within the same compose, contact me at: kafka_broker1 at port 29092"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka_broker1:${KAFKA_CONTROLLER_PORT}" # defines list of authoritative controller nodes responsible for voting and electing leaders, in this case for now its just node id 1 connected through node 1's network at port 9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER" # specifies which listener name from the KAFKA_LISTENERS list must be used exclusively for internal controller communication
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL" # specifies the listener used for data replication and synchronization between brokers
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT" # maps each listener to its security protocol (sort of type formatting u can say)
+
+      # JUST FOR THIS SINGLE NODE SETUP:
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # configures the internal __consumer_offsets tracking topic to only maintain 1 copy instead of expecting a multi-broker cluster default of 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1 # configures the internal transactional state manager ledger to only maintain 1 copy instead of expecting a multi-broker cluster default of 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1 # requires only this single broker to acknowledge transactional writes before confirming them to client apps instead of waiting for a multi-broker cluster default of 2
+
+# volumes (persistent data) must be declared at root-level of the yaml file
+# this allows the data to be saved even if the containers are recreated
+volumes:
+  pgdata: # it will be something like ./pgdata:/var/lib/postgresql/data
