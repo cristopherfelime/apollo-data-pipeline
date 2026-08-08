@@ -1,6 +1,6 @@
 """
         google play reviews scraper
-        v1.1.2 - added some more comments and fixed their placement inconsistencies, accomodated to BaseScraper changes
+        v1.1.3 - 
 """
 
 import logging # logging purposes
@@ -78,7 +78,7 @@ class PlayStoreScraper(BaseScraper):
         arguments: self, target (the target to scrape), count (number of data to fetch), lang (language of the reviews to fetch, default is ms or malaysian), country (country of the reviews to fetch, default is my or malaysian) idk why malaysia needs ms for lang and my for country but Ok
         EXPECTED TO return: list of dict (raw review data scraped by the package)
     """
-    async def fetch(self, target: str, count: int, lang: str, country: str) -> list[dict]:
+    async def fetch(self, target: str, count: int, lang: str="ms", country: str="my") -> list[dict]: # lang and country needs default values to follow Listkov Substitution Principle, PlayStoreScraper is a child class of BaseScraper and BaseScraper doesnt have default values for lang and country, so we need to provide them here, if not it'll raise TypeError: fetch() missing 2 required positional argument: 'lang', 'country' ()
         try:
             result, _ = await asyncio.to_thread( # runs the sync function in a separate thread using the thread pool
                 reviews,

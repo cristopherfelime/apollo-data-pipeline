@@ -97,12 +97,12 @@ class MarketauxScraper(BaseScraper):
 		fetches data from the api (asynchronously)
 		static version possible
 		arguments: self, target (string url of the api endpoint, default is self.endpoint (doesnt show it like that in the method parameter signature MAINLY TO AVOID ERROR BELOW)), params (dictionary of string:string to be added as parameters, default is self.params), count (integer number of requests to make, default is None)
-		EXPECTED TO return: list of dictionaries containing the api response
+		EXPECTED TO return: list of httpx.Response or Exception objects
 	"""
 	# the error i was talking about:
 	# TypeError: fetch() missing 1 required positional argument: 'target'
 	# son
-	async def fetch(self, target: str | None = None, params: dict[str, str] | None = None, count: int=1) -> list[dict]:
+	async def fetch(self, target: str | None=None, params: dict[str, str] | None=None, count: int=1) -> list[httpx.Response | Exception]:
 		responses = []
 		# cant use self for default argument values because they're evaluated during module import, can raise AttributeError
 		# should work now
@@ -129,10 +129,10 @@ class MarketauxScraper(BaseScraper):
 	"""
 		processes the fetched payload and returns a list of validated FinancialNewsPayload objects
 		STATIC POTENTIAL GUY ahh
-		arguments: self, payload (list of dictionaries (response) from api call)
+		arguments: self, payload (list of httpx.Response or Exception from api call)
 		EXPECTED TO return: list of FinancialNewsPayload objects
 	"""
-	async def process(self, payload: list[dict]) -> list[FinancialNewsPayload]:
+	async def process(self, payload: list[httpx.Response | Exception]) -> list[FinancialNewsPayload]:
 		processed_news = []
 		for news_batch in payload:
 			if isinstance(news_batch, Exception): # if guard to catch any asyncio.gather() related exceptions like httpx timeouts
@@ -140,9 +140,9 @@ class MarketauxScraper(BaseScraper):
 				continue
 			try:
 				news_batch.raise_for_status() # this is a continuation from fetch() explanation above, if the response has an error status code, raise httpx.HTTPStatusError so that it is caught below
-				news_dict = news_batch.json() # essentially parses the json response to python dict
-				try:
-					for news_item in news_dict.get("data", []): # iterating through the list of news items (need to subset to data field since there are other field in the json response (meta))
+				news_dict = news_batch.json() # essentially parses the json httpx.Response objects to python dict
+				for news_item in news_dict.get("data", []): # iterating through the list of news items (need to subset to data field since there are other field in the json response (meta))
+					try: # prev ver accidentally put try-except outside of the for loop, this should properly handle individual news item level exception now
 						entities = news_item.get("entities") # to check if entities key exists
 						if entities and isinstance(entities, list) and (len(entities) > 0): # if guard for entities, checks if its not None, is a list, and has content
 							news_item["sentiment_score"] = news_item["entities"][0].get("sentiment_score") # and yea so sentiment_score is located in the entities key of each data, where entities store their dictionary data inside a list
@@ -150,11 +150,11 @@ class MarketauxScraper(BaseScraper):
 							news_item["sentiment_score"] = None # if condition fails, sentiment_score can be set to None, still acceptable in FinancialNewsPayload schema
 						validated_news = FinancialNewsPayload.model_validate(news_item) # any ValidationError will be caught below
 						processed_news.append(validated_news)
-				# this is individual news item level
-				except ValidationError as e:
-					logger.error(f"Model validation error, skipping following news item: {e}")
-				except Exception as e:
-					logger.error(f"Unexpected error occurred in process() [INDIVIDUAL NEWS ITEM LEVEL], skipping following news item: {e}")
+					# this is individual news item level
+					except ValidationError as e:
+						logger.error(f"Model validation error, skipping following news item: {e}")
+					except Exception as e:
+						logger.error(f"Unexpected error occurred in process() [INDIVIDUAL NEWS ITEM LEVEL], skipping following news item: {e}")
 			# this is news_batch level
 			except httpx.HTTPStatusError as e: # if a status code error was in fact encountered, only skip the current news batch instead of terminating the entire process()
 				logger.error(f"httpx.HTTPStatusError {e.response.status_code} occurred from httpx.get(), skipping current news")
@@ -188,7 +188,7 @@ class MarketauxScraper(BaseScraper):
 		arguments: self, search_targets (list of search target strings like ['Maybank', 'Boost']), count (integer number of requests per keyword, default is 1), params (optional query parameters dictionary)
 		EXPECTED TO return: list of FinancialNewsPayload
 	"""
-	async def run(self, search_targets: list[str], count: int = 1, params: dict[str, str] | None = None) -> list[FinancialNewsPayload]:
+	async def run(self, search_targets: list[str], count: int=1, params: dict[str, str] | None = None) -> list[FinancialNewsPayload]:
 		request_params = {**self.params, **(params or {})} # unpack instance params for the fetch call batch for each target search keyword, defaults to class-level params or empty dict
 		tasks_fetch = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
 			self.fetch(target=self.endpoint, params={**request_params, "search": target}, count=count)
