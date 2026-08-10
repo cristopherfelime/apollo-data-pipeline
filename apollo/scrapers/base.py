@@ -1,6 +1,6 @@
 """
         abstract controller class for both scrapers to be used (play_store.py and marketaux.py)
-        v1.1 - parameters of the abstract methods are modified, to accomodate for MarketauxScraper more
+        v1.2 - run() is now an abstract method to be overriden by the children
 """
 
 from abc import ABC, abstractmethod # for implementing abstract classes and methods on python
@@ -13,11 +13,11 @@ from typing import Any # just for expected return in fetch() and payload's type 
 class BaseScraper(ABC):
     """
         asynchronously fetches data using the given scraper, the target_id will be app_id (for play_store.py) or keywords (for marketaux.py) and count is the number of data to fetch
-        arguments: target (the target to scrape), count (number of data to fetch)
+        arguments: target (the target or list of targets to scrape), count (number of data to fetch)
         EXPECTED TO return: list of Any (raw data fetched from the target, most of the time would be dict)
     """
     @abstractmethod
-    async def fetch(self, target: str, count: int) -> list[Any]:
+    async def fetch(self, target: str | list[str], count: int) -> list[Any] | list[list[Any]]:
         pass
 
     """
@@ -27,4 +27,13 @@ class BaseScraper(ABC):
     """
     @abstractmethod
     async def process(self, payload: list[Any]) -> list[BaseModel]:
+        pass
+
+    """
+        asynchronously run the entire fetching and processing as well as validation procedure using limited parameters and some default values
+        arguments: count (number of data to fetch)
+        EXPECTED TO return: list of BaseModel (ready to be streamed to kafka)
+    """
+    @abstractmethod
+    async def run(self, count: int) -> list[BaseModel]:
         pass

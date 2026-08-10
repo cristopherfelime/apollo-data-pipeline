@@ -1,6 +1,6 @@
 """
         google play reviews scraper
-        v1.1.3 - 
+        v1.1.4 - more LSP implementation updates
 """
 
 import logging # logging purposes
@@ -32,15 +32,24 @@ logger = logging.getLogger(__name__)
 """
 # inherits BaseScraper: abstract attribute required -> data (list[BaseModel])
 class PlayStoreScraper(BaseScraper):
-    app_dict: dict = {}
+    app_dict: dict
+
 
     """
         initializes the scraper
         arguments: self, app_dict (dict): dictionary to store app ids and app names
         EXPECTED TO return: None
     """
-    def __init__(self, app_dict: dict):
-        self.app_dict = app_dict
+    def __init__(self, app_dict: dict=None):
+        if app_dict:
+            self.app_dict = app_dict
+        else: # default instance app_dict
+            self.app_dict = {
+                    "my.com.gxbank.app": "GX Bank",
+                    "my.com.tngdigital.ewallet": "TNG eWallet",
+                    "com.maybank2u.life": "MAE by Maybank2u",
+                    "my.com.myboost": "Boost"
+                }
 
 
 
@@ -74,35 +83,51 @@ class PlayStoreScraper(BaseScraper):
     """
         OVERRIDES fetch() FROM BaseScraper
         fetch reviews from google play store for a specific app, google_play_scraper was written with synchronous blocking, so this will ofload it to an async function using asyncio.to_thread instead
-        js realized this can also be used as a standalone fetcher outside of the class, make a static version later maybe when necessary?
-        arguments: self, target (the target to scrape), count (number of data to fetch), lang (language of the reviews to fetch, default is ms or malaysian), country (country of the reviews to fetch, default is my or malaysian) idk why malaysia needs ms for lang and my for country but Ok
+        arguments: self, target (the target or list of targets to scrape), count (number of data to fetch), lang (language of the reviews to fetch, default is ms or malaysian), country (country of the reviews to fetch, default is my or malaysian) idk why malaysia needs ms for lang and my for country but Ok
         EXPECTED TO return: list of dict (raw review data scraped by the package)
     """
-    async def fetch(self, target: str, count: int, lang: str="ms", country: str="my") -> list[dict]: # lang and country needs default values to follow Listkov Substitution Principle, PlayStoreScraper is a child class of BaseScraper and BaseScraper doesnt have default values for lang and country, so we need to provide them here, if not it'll raise TypeError: fetch() missing 2 required positional argument: 'lang', 'country' ()
+    async def fetch(self, target: str | list[str] | None = None, count: int = 1, lang: str = "ms", country: str = "my") -> list[dict] | list[list[dict]]: # lang and country needs default values to follow Listkov Substitution Principle, PlayStoreScraper is a child class of BaseScraper and BaseScraper doesnt have default values for lang and country, so we need to provide them here, if not it'll raise TypeError: fetch() missing 2 required positional argument: 'lang', 'country' ()
+        responses = []
+        target = target or list(self.app_dict.keys()) # if target is None, set it to all app ids in the app_dict
         try:
-            result, _ = await asyncio.to_thread( # runs the sync function in a separate thread using the thread pool
-                reviews,
-                target,
-                count=count,
-                lang=lang,
-                country=country
-            )
-            return result
+            if isinstance(target, str): # for singular target
+                responses, _ = await asyncio.to_thread( # runs the sync function in a separate thread using the thread pool
+                    reviews,
+                    target,
+                    count=count,
+                    lang=lang,
+                    country=country
+                )
+            elif isinstance(target, list): # for multiple targets
+                tasks_fetch = [
+                    asyncio.to_thread(
+                        reviews,
+                        t,
+                        count=count,
+                        lang=lang,
+                        country=country
+                    )
+                    for t in target # for every target in the targets list, make a fetch task for them and append them to the list above
+                ] # list containing fetch tasks to be passed into gather()
+                results_list = await asyncio.gather(*tasks_fetch)
+                responses = [r[0] for r in results_list] # google_play_scraper returns a list of (results_list, token), we only need the results_list so we take r[0]
         except Exception as e:
             logger.error(f"Error fetching reviews for app {target}: {e}")
-            return [] # returns empty list so itertools.chain down below dont break
+        return responses
 
     """
         OVERRIDES process() FROM BaseScraper
         process and validates each reviews, correctly mapping app name and id to the reviews, using pydantic to ensure and validate the data
-        same as above ngl, can make the static version, this version is mainly for batch processing in run() method
-        arguments: self, target (target where the review responses come from), payload (list of raw review data scraped by the package)
+        arguments: self, payload (list of raw review data scraped by the package), target (target where the review responses come from, default is None)
         EXPECTED TO return: list of ReviewPayload (validated and cleaned data based on the schemas in schemas.py)
     """
-    async def process(self, target: str, payload: list[dict]) -> list[ReviewPayload]:
+    async def process(self, payload: list[dict], target: str | None=None) -> list[ReviewPayload]:
         processed_reviews = [] # to store all the processed reviews from all the raw api responses for the final return
         for review in payload: # iterate through each of the raw api responses for the current app id
-            review.update({"app_name": self.app_dict[target], "app_id": target}) # update the raw review data to include the app name and app id, matching the schema in ReviewPayload
+            if target and (target in self.app_dict.keys()): # if target is provided
+                review.update({"app_name": self.app_dict.get(target), "app_id": target}) # update the raw review data to include the app name and app id, matching the schema in ReviewPayload
+            else: # if target is not provided or not in the app_dict
+                review.update({"app_name": "Unknown App", "app_id": "com.unknown"}) # default to unknown app name and id
             try: # try to validate each reviews
                 validated_review = ReviewPayload.model_validate(review)
                 processed_reviews.append(validated_review) # if there's no ValidationError raised by pydantic, then append the validated review to processed_reviews
@@ -113,6 +138,7 @@ class PlayStoreScraper(BaseScraper):
         return processed_reviews
 
     """
+        OVERRIDES run() FROM BaseScraper
         runs the scraper on all given app ids in the app_dict as well as review count on each app
         arguments: self, count (number of data to fetch per app), lang (language of the reviews to fetch, default is ms or malaysian), country (country of the reviews to fetch, default is my or malaysian)
         EXPECTED TO return: list of ReviewPayload (now with all the reviews combined from all apps!)
@@ -121,12 +147,11 @@ class PlayStoreScraper(BaseScraper):
 
         # fetch
         app_ids = list(self.app_dict.keys()) # list of app ids to be scraped
-        tasks_fetch = [self.fetch(app_id, count, lang, country) for app_id in app_ids] # list of fetch_reviews() tasks to be passed into asyncio.gather()
-        fetch_results = await asyncio.gather(*tasks_fetch) # execute the list of fetch tasks concurrently, wait for all the fetch tasks to complete
+        fetch_results = await self.fetch(app_ids, count, lang, country) #  execute the fetch method concurrently
         raw_data_map = dict(zip(app_ids, fetch_results)) # map results back to their respective app id (asyncio.gather guarantees following the order the tasks were given so zip is viable), maintains O(1) rather than hardcoding list index for each app (gx_app = fetch_results[0] and etc)
 
         # process and validate
-        tasks_process = [self.process(app_id, raw_data_map[app_id]) for app_id in app_ids] # similar process above but for processing the reviews instead
+        tasks_process = [self.process(raw_data_map[app_id], app_id) for app_id in app_ids] # similar process above but for processing the reviews instead
         processed_results = await asyncio.gather(*tasks_process)
 
         # asyncio.gather() returns a list of returns from each of its tasks, which means we must flatten them here
@@ -148,15 +173,8 @@ class PlayStoreScraper(BaseScraper):
     main function to run the scraper from terminal, js test purposes only
 """
 async def main():
-    app_dict = { # list of apps to be scraped: keys are app ids and values are app names, more app targets can js be added here
-        "my.com.gxbank.app": "GX Bank",
-        "my.com.tngdigital.ewallet": "TNG eWallet",
-        "com.maybank2u.life": "MAE by Maybank2u",
-        "my.com.myboost": "Boost"
-    }
-
-    scraper = PlayStoreScraper(app_dict)
-    results = await scraper.run(10, "ms", "my")
+    scraper = PlayStoreScraper()
+    results = await scraper.run(10)
     print(results)
     print(f"succesfully scrapped {len(results)} reviews")
 

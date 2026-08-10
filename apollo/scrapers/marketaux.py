@@ -1,6 +1,6 @@
 """
 		marketaux api scraper
-		v1.0
+		v1.1 - LSP implementation for the methods
 """
 
 import logging # logging purposes
@@ -35,13 +35,25 @@ load_dotenv()
 class MarketauxScraper(BaseScraper):
 	endpoint: str = "https://api.marketaux.com/v1/news/all"
 	params: dict[str, str]
+	search_targets: list[str]
 	client: httpx.AsyncClient
 
-	def __init__(self, params: dict[str, str] | None=None):
+	def __init__(self, params: dict[str, str] | None=None, search_targets: list[str] | None=None):
 		self.client = None
-		self.params = {}
 		if params:
-			self.params.update(params)
+			self.params = params
+		else: # default instance params
+			self.params = {
+				"api_token": os.getenv("MARKETAUX_TOKEN"),
+				"limit": 3,
+				"language": "en",
+				"country": "my"
+			}
+		if search_targets:
+			self.search_targets = search_targets
+		else: # default instance search_targets
+			self.search_targets = ["Maybank", "Boost", "GX Bank", "TNG eWallet"]
+			
 
 
 
@@ -64,12 +76,32 @@ class MarketauxScraper(BaseScraper):
 			self.params.pop(param, None) # use None as the default value, so that if the parameter is not in the dictionary, it will not raise an error
 
 	"""
+		adds targets to the search_targets list
+		arguments: self, search_targets (list of strings to be added)
+		EXPECTED TO return: None
+	"""
+	def add_search_targets(self, search_targets: list[str]) -> None:
+		self.search_targets.extend(search_targets)
+
+	"""
+		removes targets from the search_targets list
+		arguments: self, search_targets (list of strings (target names or keys in this case) to be removed)
+		EXPECTED TO return: None
+	"""
+	def remove_search_targets(self, search_targets: list[str]) -> None:
+		for target in search_targets:
+			if target in self.search_targets:
+				self.search_targets.remove(target)
+
+	"""
 		sets the endpoint url for the http request
 		arguments: self, endpoint (string url of the api endpoint)
 		EXPECTED TO return: None
 	"""
 	def set_endpoint(self, endpoint: str) -> None:
 		self.endpoint = endpoint
+
+
 
 	"""
 		starts the async http client
@@ -102,7 +134,7 @@ class MarketauxScraper(BaseScraper):
 	# the error i was talking about:
 	# TypeError: fetch() missing 1 required positional argument: 'target'
 	# son
-	async def fetch(self, target: str | None=None, params: dict[str, str] | None=None, count: int=1) -> list[httpx.Response | Exception]:
+	async def fetch(self, target: str | list[str] | None=None, params: dict[str, str] | None=None, count: int=1) -> list[httpx.Response | Exception] | list[list[httpx.Response | Exception]]:
 		responses = []
 		# cant use self for default argument values because they're evaluated during module import, can raise AttributeError
 		# should work now
@@ -111,13 +143,25 @@ class MarketauxScraper(BaseScraper):
 		try:
 			if self.client is None: # ensure httpx client is initialized before making requests
 				await self.start_client()
-			tasks_fetch = [
-				self.client.get(
-					url=target,
-					params=params
-				) for _ in range(count) # using * count only duplicates the memory pointer, not the actual task objects so we should use ts comprehension instead
-			]
-			responses = await asyncio.gather(*tasks_fetch, return_exceptions=True) # unlike fetch() in PlayStoreScraper that processes reviews one-by-one, this fetch() uses gather to fetch multiple requests at once so to avoid one bad request invalidates the entire batch, use return_exception=True
+			if isinstance(target, str): # for singular target
+				tasks_fetch = [
+					self.client.get(
+						url=target,
+						params=params
+					)
+					for _ in range(count) # using * count only duplicates the memory pointer, not the actual task objects so we should use ts comprehension instead
+				]
+				responses = await asyncio.gather(*tasks_fetch, return_exceptions=True) # unlike fetch() in PlayStoreScraper that processes reviews one-by-one, this fetch() uses gather to fetch multiple requests at once so to avoid one bad request invalidates the entire batch, use return_exception=True
+			elif isinstance(target, list): # for multiple targets
+				tasks_fetch = [
+					self.client.get(
+						url=t,
+						params=params
+					)
+					for t in target # for each target in the targets list
+					for _ in range(count) # and for each target, make 'count' amount of requests
+				]
+				responses = await asyncio.gather(*tasks_fetch, return_exceptions=True) # unlike fetch() in PlayStoreScraper that processes reviews one-by-one, this fetch() uses gather to fetch multiple requests at once so to avoid one bad request invalidates the entire batch, use return_exception=True
 
 			# rather than raising each status one by one iterating through responses, we will handle them later in process(), mostly same reason as above:
 			# if one response fail, the entire batch is not rejected immediately, we can process good responses and drop bad ones instead, thus improving throughput
@@ -126,9 +170,9 @@ class MarketauxScraper(BaseScraper):
 			logger.error(f"Error fetching from API: {e}")
 		return responses
 	
-	"""
+	""" 
+		OVERRIDES process() FROM BaseScraper
 		processes the fetched payload and returns a list of validated FinancialNewsPayload objects
-		STATIC POTENTIAL GUY ahh
 		arguments: self, payload (list of httpx.Response or Exception from api call)
 		EXPECTED TO return: list of FinancialNewsPayload objects
 	"""
@@ -184,12 +228,14 @@ class MarketauxScraper(BaseScraper):
 		await self.close_client()
 
 	"""
+		OVERRIDES run() FROM BaseScraper
 		runs the api fetch and process pipeline on the marketaux rest api for multiple search target keywords concurrently
-		arguments: self, search_targets (list of search target strings like ['Maybank', 'Boost']), count (integer number of requests per keyword, default is 1), params (optional query parameters dictionary)
+		arguments: self, count (integer number of requests per keyword, default is 1), search_targets (list of search target strings like ['Maybank', 'Boost']), params (optional query parameters dictionary)
 		EXPECTED TO return: list of FinancialNewsPayload
 	"""
-	async def run(self, search_targets: list[str], count: int=1, params: dict[str, str] | None = None) -> list[FinancialNewsPayload]:
-		request_params = {**self.params, **(params or {})} # unpack instance params for the fetch call batch for each target search keyword, defaults to class-level params or empty dict
+	async def run(self, count: int=3, search_targets: list[str] | None=None, params: dict[str, str] | None=None) -> list[FinancialNewsPayload]:
+		search_targets = [*(self.search_targets if search_targets is None else search_targets)] # unpacks instance search_targets if the provided argument is None, else unpacks that argument instead
+		request_params = {**(self.params if params is None else params)} # same as above but dictionary comprehension for params
 		tasks_fetch = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
 			self.fetch(target=self.endpoint, params={**request_params, "search": target}, count=count)
 			for target in search_targets
@@ -210,9 +256,9 @@ async def main():
 		"language": "en", # not a lot of malaysian lang news so had to use english. might need to use a different BERT model as well later in artemis
 		"country": "my"
 	}
-	search_targets = ["Maybank", "Boost", "GX Bank", "TNG eWallet"] # kidna suck now that itll take like 4 api usage now since search parameter in the api call turns out to be searching for news with all those words instead of having at least one of those words
-	async with MarketauxScraper(params) as scraper: # example of using the scraper with context manager
-		results = await scraper.run(search_targets=search_targets, count=1)
+	search_targets = ["Maybank", "Boost", "GX Bank", "TNG eWallet"] # kinda suck now that itll take like 4 api usage now since search parameter in the api call turns out to be searching for news with all those words instead of having at least one of those words
+	async with MarketauxScraper(params, search_targets) as scraper: # example of using the scraper with context manager
+		results = await scraper.run(count=1)
 	print(results)
 	print(f"succesfully scrapped {len(results)} news")
 
