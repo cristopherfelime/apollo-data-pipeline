@@ -234,17 +234,31 @@ class MarketauxScraper(BaseScraper):
 		EXPECTED TO return: list of FinancialNewsPayload
 	"""
 	async def run(self, count: int=3, search_targets: list[str] | None=None, params: dict[str, str] | None=None) -> list[FinancialNewsPayload]:
-		search_targets = [*(self.search_targets if search_targets is None else search_targets)] # unpacks instance search_targets if the provided argument is None, else unpacks that argument instead
-		request_params = {**(self.params if params is None else params)} # same as above but dictionary comprehension for params
-		tasks_fetch = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
-			self.fetch(target=self.endpoint, params={**request_params, "search": target}, count=count)
-			for target in search_targets
-		]
-		fetch_results_nested = await asyncio.gather(*tasks_fetch) # gather all fetch tasks to run concurrently
-		fetch_results = list(itertools.chain.from_iterable(fetch_results_nested)) # and flatten the nested list of responses from each search target
-		processed_results = await self.process(fetch_results) # process and validate all the results
-		return processed_results
-		
+		opened_locally = self.client is None # using async with statement, the context manager client will be initialized (from __aenter__()), so this flag will only evaluate to true if run() is executed standalone without with statement
+		try:
+			if opened_locally: # since standalone (local) run() don't automatically call __aenter__() unlike using with statement, this if guard ensures that the client is initialized
+				await self.start_client()
+
+			search_targets = [*(self.search_targets if search_targets is None else search_targets)] # unpacks instance search_targets if the provided argument is None, else unpacks that argument instead
+			request_params = {**(self.params if params is None else params)} # same as above but dictionary comprehension for params
+
+			tasks_fetch = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
+				self.fetch(target=self.endpoint, params={**request_params, "search": target}, count=count)
+				for target in search_targets
+			]
+			fetch_results_nested = await asyncio.gather(*tasks_fetch) # gather all fetch tasks to run concurrently
+			fetch_results = list(itertools.chain.from_iterable(fetch_results_nested)) # and flatten the nested list of responses from each search target
+			processed_results = await self.process(fetch_results) # process and validate all the results
+
+			return processed_results
+
+		except Exception as e: # basically the very upper level of exception catching when using run()
+			logger.error(f"Error running scraper: {e}")
+			return [] # returns empty list as a measure to avoid any downstream issue
+		finally:
+			if opened_locally: # now with the same flag above, we can know whether the method was ran individually (locally) or not, if so then close the client with this finally block. context manager client will always be closed in the end through __aexit__() instead of the finally block check
+				await self.close_client()
+
 
 """
 	the main function to run the scraper from terminal, js test purposes only
