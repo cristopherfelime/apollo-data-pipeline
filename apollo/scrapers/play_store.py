@@ -1,10 +1,11 @@
 """
         google play reviews scraper
-        v1.1.4 - more LSP implementation updates
+        v1.2 - standardized exceptions logging throughout the class, and updated methods to support graceful termination, updated and standardized class docstring alongside MarketauxScraper
 """
 
 import logging # logging purposes
 import asyncio # python's asynchronous programming library
+from asyncio import CancelledError # to catch cancelled error (like KeyboardInterrupt)
 from google_play_scraper import reviews # google play scraper library we'll be using
 from pydantic import ValidationError # for catching validation errors
 import itertools # for flattening the list of lists
@@ -20,15 +21,15 @@ logger = logging.getLogger(__name__)
 """
     the play store scraper class
     attributes:
-        app_dict (dict): dictionary to store app ids and app names
+        app_dict (dict[str, str]): dictionary storing target app package ids mapped to human-readable app titles
     methods:
-        __init__ -> initializes the scraper with the given app_dict
-        add_app_dict -> adds an app to the scraper's app_dict
-        get_app_dict -> returns the scraper's app_dict
-        remove_app -> removes an app from the scraper's app_dict
-        fetch -> fetches reviews from google play store for a specific app (overrides abstract method)
-        process -> processes and validates each review (overrides abstract method)
-        run -> runs the scraper on all given app ids in the app_dict as well as review count on each app
+        __init__ -> initializes the scraper with optional app_dict
+        add_app_dict -> adds an app package id and title to app_dict
+        get_app_dict -> returns the current app_dict
+        remove_app -> removes an app package id from app_dict
+        fetch -> fetches reviews from google play store asynchronously (overrides BaseScraper)
+        process -> processes raw review dicts into validated ReviewPayload models (overrides BaseScraper)
+        run -> runs full fetch and process pipeline for all apps concurrently (overrides BaseScraper)
 """
 # inherits BaseScraper: abstract attribute required -> data (list[BaseModel])
 class PlayStoreScraper(BaseScraper):
@@ -111,8 +112,12 @@ class PlayStoreScraper(BaseScraper):
                 ] # list containing fetch tasks to be passed into gather()
                 results_list = await asyncio.gather(*tasks_fetch)
                 responses = [r[0] for r in results_list] # google_play_scraper returns a list of (results_list, token), we only need the results_list so we take r[0]
+        except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt
+            logger.info(f"(Apollo) PlayStoreScraper.fetch() was running, then was stopped by the user (KeyboardInterrupt)")
+            raise # also raise CancelledError to let higher level async methods clean/close any resources as well
         except Exception as e:
-            logger.error(f"Error fetching reviews for app {target}: {e}")
+            logger.error(f"(Apollo) PlayStoreScraper.fetch() error fetching reviews: {e}")
+            return []
         return responses
 
     """
@@ -122,20 +127,27 @@ class PlayStoreScraper(BaseScraper):
         EXPECTED TO return: list of ReviewPayload (validated and cleaned data based on the schemas in schemas.py)
     """
     async def process(self, payload: list[dict], target: str | None=None) -> list[ReviewPayload]:
-        processed_reviews = [] # to store all the processed reviews from all the raw api responses for the final return
-        for review in payload: # iterate through each of the raw api responses for the current app id
-            if target and (target in self.app_dict.keys()): # if target is provided
-                review.update({"app_name": self.app_dict.get(target), "app_id": target}) # update the raw review data to include the app name and app id, matching the schema in ReviewPayload
-            else: # if target is not provided or not in the app_dict
-                review.update({"app_name": "Unknown App", "app_id": "com.unknown"}) # default to unknown app name and id
-            try: # try to validate each reviews
-                validated_review = ReviewPayload.model_validate(review)
-                processed_reviews.append(validated_review) # if there's no ValidationError raised by pydantic, then append the validated review to processed_reviews
-            except ValidationError as e: # if a review data does not match the schema, validation failed so log an error and skip the review
-                logger.error(f"Model validation error, skipping following review: {e}")
-            except Exception as e: # just in case if theres any other unexpected error
-                logger.error(f"Unexpected error occured in process(): {e}\nSkipping following review: {review}")
-        return processed_reviews
+        try:
+            processed_reviews = [] # to store all the processed reviews from all the raw api responses for the final return
+            for review in payload: # iterate through each of the raw api responses for the current app id
+                if target and (target in self.app_dict.keys()): # if target is provided
+                    review.update({"app_name": self.app_dict.get(target), "app_id": target}) # update the raw review data to include the app name and app id, matching the schema in ReviewPayload
+                else: # if target is not provided or not in the app_dict
+                    review.update({"app_name": "Unknown App", "app_id": "com.unknown"}) # default to unknown app name and id
+                try: # try to validate each reviews
+                    validated_review = ReviewPayload.model_validate(review)
+                    processed_reviews.append(validated_review) # if there's no ValidationError raised by pydantic, then append the validated review to processed_reviews
+                except ValidationError as e: # if a review data does not match the schema, validation failed so log an error and skip the review
+                    logger.error(f"Model validation error, skipping following review: {e}")
+                except Exception as e: # just in case if theres any other unexpected error
+                    logger.error(f"Unexpected error occured in process(): {e}\nSkipping following review: {review}")
+            return processed_reviews
+        except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt
+            logger.info(f"(Apollo) PlayStoreScraper.process() was running, then was stopped by the user (KeyboardInterrupt)")
+            raise # also raise CancelledError to let higher level async methods clean/close any resources as well
+        except Exception as e:
+            logger.error(f"(Apollo) PlayStoreScraper.process() error: {e}")
+            return []
 
     """
         OVERRIDES run() FROM BaseScraper
@@ -144,29 +156,26 @@ class PlayStoreScraper(BaseScraper):
         EXPECTED TO return: list of ReviewPayload (now with all the reviews combined from all apps!)
     """
     async def run(self, count: int=100, lang: str="ms", country: str="my") -> list[ReviewPayload]:
+        try:
+            # fetch
+            app_ids = list(self.app_dict.keys()) # list of app ids to be scraped
+            fetch_results = await self.fetch(app_ids, count, lang, country) #  execute the fetch method concurrently
+            raw_data_map = dict(zip(app_ids, fetch_results)) # map results back to their respective app id (asyncio.gather guarantees following the order the tasks were given so zip is viable), maintains O(1) rather than hardcoding list index for each app (gx_app = fetch_results[0] and etc)
 
-        # fetch
-        app_ids = list(self.app_dict.keys()) # list of app ids to be scraped
-        fetch_results = await self.fetch(app_ids, count, lang, country) #  execute the fetch method concurrently
-        raw_data_map = dict(zip(app_ids, fetch_results)) # map results back to their respective app id (asyncio.gather guarantees following the order the tasks were given so zip is viable), maintains O(1) rather than hardcoding list index for each app (gx_app = fetch_results[0] and etc)
+            # process and validate
+            tasks_process = [self.process(raw_data_map[app_id], app_id) for app_id in app_ids] # similar process above but for processing the reviews instead
+            processed_results = await asyncio.gather(*tasks_process)
 
-        # process and validate
-        tasks_process = [self.process(raw_data_map[app_id], app_id) for app_id in app_ids] # similar process above but for processing the reviews instead
-        processed_results = await asyncio.gather(*tasks_process)
+            # asyncio.gather() returns a list of returns from each of its tasks, which means we must flatten them here
+            combined_results = list(itertools.chain.from_iterable(processed_results)) # should work now, fetch failures now returns empty list and process failures didnt append anything
 
-        # asyncio.gather() returns a list of returns from each of its tasks, which means we must flatten them here
-        combined_results = list(itertools.chain.from_iterable(processed_results)) # should work now, fetch failures now returns empty list and process failures didnt append anything
-
-        return combined_results
-
-        """ some test
-        # sample = await fetch_reviews("my.com.gxbank.app", 1)
-        # print(sample)
-
-        sample = await fetch_reviews("my.com.gxbank.app", 1)
-        returned_review =  await process_review("GX Bank", "my.com.gxbank.app", sample[0])
-        print(returned_review.model_dump_json())
-        """
+            return combined_results
+        except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt
+            logger.info(f"(Apollo) PlayStoreScraper.run() was running, then was stopped by the user (KeyboardInterrupt)")
+            raise # also raise CancelledError to let higher level async methods clean/close any resources as well
+        except Exception as e:
+            logger.error(f"(Apollo) PlayStoreScraper.run() unexpected error while running scraper: {e}")
+            return []
 
 
 """
@@ -179,4 +188,7 @@ async def main():
     print(f"succesfully scrapped {len(results)} reviews")
 
 if __name__ == "__main__": # if u want to test on running it directly on terminal
-    results = asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("play_store.py keyboard interrupt test")

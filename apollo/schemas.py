@@ -105,34 +105,3 @@ class FinancialNewsPayload(BaseModel):
             cleaned_text = " ".join(stripped_text.split())
             return cleaned_text
         return news_text
-
-    # ----- archived -----
-
-    """ REPLACED BY pattern in url field validator
-            field validator for url, to verify if it is a valid http/https link
-            arguments: cls (class itself), url (the url)
-            returns: validated url
-
-        @field_validator("url", mode="before")
-        @classmethod
-        def validate_url(cls, url: str) -> str:
-            if not HTTP_HTTPS_URL_REGEX.fullmatch(url): # check if url doesnt fully match with the http/https regex pattern above
-                raise ValueError(f"Invalid url: {url}") # if it doesn't, raise ValueError
-            return url # if it does, all good 
-        
-
-         i heard pydantic automatically parses strings in UTC format to datetime, which is cool (even the Z at the end)
-            field validator for published_at, since the payload response of published_at is string with UTC formatting
-            arguments: cls (class itself), published_at (the published_at string in iso format from marketaux api)
-            returns: converted published_at
-
-        @field_validator("published_at", mode="before")
-        @classmethod
-        def convert_published_at(cls, published_at: str) -> datetime:
-            if not isinstance(published_at, str): # if published_at is not a string
-                raise ValueError(f"published_at must be a string: {published_at}")
-            try:
-                return datetime.fromisoformat(published_at.replace("Z", "+00:00")) # replace the z with +00:00 for UTC time format to be recognized by fromisoformat
-            except ValueError: # if conversion failed
-                raise ValueError(f"conversion of published_at from str to datetime UTC format failed: {published_at}")
-    """

@@ -1,10 +1,11 @@
 """
 		marketaux api scraper
-		v1.1 - LSP implementation for the methods
+		v1.2 - standardized exceptions logging throughout the class, and updated methods to support graceful termination, updated and standardized class docstring alongside PlayStoreScraper, new default search_target values to be more specific to avoid false positive unrelated search results (like "Boost" accidentally referencing unrelated news)
 """
 
 import logging # logging purposes
 import asyncio # python's asynchronous programming library
+from asyncio import CancelledError # to catch cancelled error (like KeyboardInterrupt)
 import os # os file navigation purposes
 from dotenv import load_dotenv # for loading environment variables from .env file
 import httpx # python's improved http requests library, used to make request to the rest api
@@ -25,11 +26,24 @@ load_dotenv()
 """
 	the marketaux scraper class
 	attributes:
-		marketaux_token (str): api token for marketaux rest api
-		client (httpx.AsyncClient): async http client for making requests to the rest api
+		endpoint (str): url endpoint for marketaux rest api
+		params (dict[str, str]): dictionary of query parameters for the http request
+		search_targets (list[str]): list of search target keywords to query concurrently
+		client (httpx.AsyncClient | None): async http client for making requests to the rest api
 	methods:
-		__init__ -> initializes the scraper
-		
+		__init__ -> initializes the scraper with params and search_targets
+		add_params -> adds parameters to request params
+		remove_params -> removes parameters from request params
+		add_search_targets -> adds search keywords to search_targets
+		remove_search_targets -> removes search keywords from search_targets
+		set_endpoint -> sets the endpoint url for the http request
+		start_client -> initializes the httpx.AsyncClient
+		close_client -> closes the httpx.AsyncClient
+		fetch -> fetches news data from marketaux rest api (overrides BaseScraper)
+		process -> processes and validates raw responses into FinancialNewsPayload (overrides BaseScraper)
+		__aenter__ -> enters async context manager
+		__aexit__ -> exits async context manager
+		run -> runs full fetch and process pipeline for search targets concurrently (overrides BaseScraper)
 """
 # inherits BaseScraper: abstract attribute required -> data (list[BaseModel])
 class MarketauxScraper(BaseScraper):
@@ -52,7 +66,7 @@ class MarketauxScraper(BaseScraper):
 		if search_targets:
 			self.search_targets = search_targets
 		else: # default instance search_targets
-			self.search_targets = ["Maybank", "Boost", "GX Bank", "TNG eWallet"]
+			self.search_targets = ["Maybank", "Boost Bank", "GXBank Malaysia", "TNG eWallet"]
 			
 
 
@@ -165,9 +179,13 @@ class MarketauxScraper(BaseScraper):
 
 			# rather than raising each status one by one iterating through responses, we will handle them later in process(), mostly same reason as above:
 			# if one response fail, the entire batch is not rejected immediately, we can process good responses and drop bad ones instead, thus improving throughput
-			
+		
+		except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt
+			logger.info(f"(Apollo) MarketauxScraper.fetch() was running, then was stopped by the user (KeyboardInterrupt)")
+			raise # also raise CancelledError to let higher level async methods clean/close any resources as well
 		except Exception as e:
-			logger.error(f"Error fetching from API: {e}")
+			logger.error(f"(Apollo) MarketauxScraper.fetch() error fetching from API: {e}")
+			return []  # return empty list when exception occurs
 		return responses
 	
 	""" 
@@ -176,34 +194,42 @@ class MarketauxScraper(BaseScraper):
 		arguments: self, payload (list of httpx.Response or Exception from api call)
 		EXPECTED TO return: list of FinancialNewsPayload objects
 	"""
+	# TODO: the triple nested try-except lowk getting ridiculous i might need to separate each processing level into their own method
 	async def process(self, payload: list[httpx.Response | Exception]) -> list[FinancialNewsPayload]:
 		processed_news = []
-		for news_batch in payload:
-			if isinstance(news_batch, Exception): # if guard to catch any asyncio.gather() related exceptions like httpx timeouts
-				logger.error(f"Network exception occurred from asyncio.gather(): {news_batch}")
-				continue
-			try:
-				news_batch.raise_for_status() # this is a continuation from fetch() explanation above, if the response has an error status code, raise httpx.HTTPStatusError so that it is caught below
-				news_dict = news_batch.json() # essentially parses the json httpx.Response objects to python dict
-				for news_item in news_dict.get("data", []): # iterating through the list of news items (need to subset to data field since there are other field in the json response (meta))
-					try: # prev ver accidentally put try-except outside of the for loop, this should properly handle individual news item level exception now
-						entities = news_item.get("entities") # to check if entities key exists
-						if entities and isinstance(entities, list) and (len(entities) > 0): # if guard for entities, checks if its not None, is a list, and has content
-							news_item["sentiment_score"] = news_item["entities"][0].get("sentiment_score") # and yea so sentiment_score is located in the entities key of each data, where entities store their dictionary data inside a list
-						else:
-							news_item["sentiment_score"] = None # if condition fails, sentiment_score can be set to None, still acceptable in FinancialNewsPayload schema
-						validated_news = FinancialNewsPayload.model_validate(news_item) # any ValidationError will be caught below
-						processed_news.append(validated_news)
-					# this is individual news item level
-					except ValidationError as e:
-						logger.error(f"Model validation error, skipping following news item: {e}")
-					except Exception as e:
-						logger.error(f"Unexpected error occurred in process() [INDIVIDUAL NEWS ITEM LEVEL], skipping following news item: {e}")
-			# this is news_batch level
-			except httpx.HTTPStatusError as e: # if a status code error was in fact encountered, only skip the current news batch instead of terminating the entire process()
-				logger.error(f"httpx.HTTPStatusError {e.response.status_code} occurred from httpx.get(), skipping current news")
-			except Exception as e:
-				logger.error(f"Unexpected error occurred in process() [BATCH LEVEL], skipping following news batch: {e}")
+		try:
+			for news_batch in payload:
+				if isinstance(news_batch, Exception): # if guard to catch any asyncio.gather() related exceptions like httpx timeouts
+					logger.error(f"MarketauxScraper.process(): Network exception occurred from asyncio.gather(), most likely due to timeouts")
+					continue
+				try:
+					news_batch.raise_for_status() # this is a continuation from fetch() explanation above, if the response has an error status code, raise httpx.HTTPStatusError so that it is caught below
+					news_dict = news_batch.json() # essentially parses the json httpx.Response objects to python dict
+					for news_item in news_dict.get("data", []): # iterating through the list of news items (need to subset to data field since there are other field in the json response (meta))
+						try: # prev ver accidentally put try-except outside of the for loop, this should properly handle individual news item level exception now
+							entities = news_item.get("entities") # to check if entities key exists
+							if entities and isinstance(entities, list) and (len(entities) > 0): # if guard for entities, checks if its not None, is a list, and has content
+								news_item["sentiment_score"] = news_item["entities"][0].get("sentiment_score") # and yea so sentiment_score is located in the entities key of each data, where entities store their dictionary data inside a list
+							else:
+								news_item["sentiment_score"] = None # if condition fails, sentiment_score can be set to None, still acceptable in FinancialNewsPayload schema
+							validated_news = FinancialNewsPayload.model_validate(news_item) # any ValidationError will be caught below
+							processed_news.append(validated_news)
+						# this is individual news item level
+						except ValidationError as e:
+							logger.error(f"(Apollo) MarketauxScraper.process() model validation error at [INDIVIDUAL NEWS ITEM LEVEL], skipping following news item: {e}")
+						except Exception as e:
+							logger.error(f"(Apollo) MarketauxScraper.process() unexpected error occurred at [INDIVIDUAL NEWS ITEM LEVEL], skipping following news item: {e}")
+				# this is news_batch level
+				except httpx.HTTPStatusError as e: # if a status code error was in fact encountered, only skip the current news batch instead of terminating the entire process()
+					logger.error(f"(Apollo) MarketauxScraper.process() httpx.HTTPStatusError {e.response.status_code} occurred from httpx.get() at [BATCH LEVEL], skipping current news batch: {e}")
+				except Exception as e:
+					logger.error(f"(Apollo) MarketauxScraper.process() unexpected error occurred at [BATCH LEVEL], skipping following news batch: {e}")
+		except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt
+			logger.info(f"(Apollo) MarketauxScraper.process() was running, then was stopped by the user (KeyboardInterrupt)")
+			raise # also raise CancelledError to let higher level async methods clean/close any resources as well
+		except Exception as e:
+			logger.error(f"(Apollo) MarketauxScraper.process() error processing data: {e}")
+			return []
 		return processed_news
 
 	# these two helper methods are similar to AutoCloseable in java in a sense that it allows for automatic resource cleaning upon done using them
@@ -234,30 +260,40 @@ class MarketauxScraper(BaseScraper):
 		EXPECTED TO return: list of FinancialNewsPayload
 	"""
 	async def run(self, count: int=3, search_targets: list[str] | None=None, params: dict[str, str] | None=None) -> list[FinancialNewsPayload]:
-		opened_locally = self.client is None # using async with statement, the context manager client will be initialized (from __aenter__()), so this flag will only evaluate to true if run() is executed standalone without with statement
 		try:
-			if opened_locally: # since standalone (local) run() don't automatically call __aenter__() unlike using with statement, this if guard ensures that the client is initialized
-				await self.start_client()
+			opened_locally = self.client is None # using async with statement, the context manager client will be initialized (from __aenter__()), so this flag will only evaluate to true if run() is executed standalone without with statement
+			try:
+				if opened_locally: # since standalone (local) run() don't automatically call __aenter__() unlike using with statement, this if guard ensures that the client is initialized
+					await self.start_client()
 
-			search_targets = [*(self.search_targets if search_targets is None else search_targets)] # unpacks instance search_targets if the provided argument is None, else unpacks that argument instead
-			request_params = {**(self.params if params is None else params)} # same as above but dictionary comprehension for params
+				search_targets = [*(self.search_targets if search_targets is None else search_targets)] # unpacks instance search_targets if the provided argument is None, else unpacks that argument instead
+				request_params = {**(self.params if params is None else params)} # same as above but dictionary comprehension for params
 
-			tasks_fetch = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
-				self.fetch(target=self.endpoint, params={**request_params, "search": target}, count=count)
-				for target in search_targets
-			]
-			fetch_results_nested = await asyncio.gather(*tasks_fetch) # gather all fetch tasks to run concurrently
-			fetch_results = list(itertools.chain.from_iterable(fetch_results_nested)) # and flatten the nested list of responses from each search target
-			processed_results = await self.process(fetch_results) # process and validate all the results
+				tasks_fetch = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
+					self.fetch(target=self.endpoint, params={**request_params, "search": target}, count=count)
+					for target in search_targets
+				]
+				fetch_results_nested = await asyncio.gather(*tasks_fetch) # gather all fetch tasks to run concurrently
+				fetch_results = list(itertools.chain.from_iterable(fetch_results_nested)) # and flatten the nested list of responses from each search target
+				processed_results = await self.process(fetch_results) # process and validate all the results
 
-			return processed_results
+				return processed_results
 
-		except Exception as e: # basically the very upper level of exception catching when using run()
-			logger.error(f"Error running scraper: {e}")
-			return [] # returns empty list as a measure to avoid any downstream issue
-		finally:
-			if opened_locally: # now with the same flag above, we can know whether the method was ran individually (locally) or not, if so then close the client with this finally block. context manager client will always be closed in the end through __aexit__() instead of the finally block check
-				await self.close_client()
+			except Exception as e: # basically the very upper level of exception catching when using run()
+				logger.error(f"Error running scraper: {e}")
+				return [] # returns empty list as a measure to avoid any downstream issue
+			finally:
+				if opened_locally: # now with the same flag above, we can know whether the method was ran individually (locally) or not, if so then close the client with this finally block. context manager client will always be closed in the end through __aexit__() instead of the finally block check
+					await self.close_client()
+		except CancelledError:
+			logger.info(f"(Apollo) MarketauxScraper.run() was running, then was stopped by the user (KeyboardInterrupt)")
+			await self.close_client() # client was open when exception was caught, so we need to close it
+			raise
+		except Exception as e:
+			logger.error(f"(Apollo) MarketauxScraper.run() unexpected error while running scraper: {e}")
+			await self.close_client()
+			return []
+
 
 
 """
@@ -277,4 +313,7 @@ async def main():
 	print(f"succesfully scrapped {len(results)} news")
 
 if __name__ == "__main__":
-	results = asyncio.run(main())
+	try:
+		asyncio.run(main())
+	except KeyboardInterrupt:
+		logger.info("marketaux.py keyboard interrupt test")
