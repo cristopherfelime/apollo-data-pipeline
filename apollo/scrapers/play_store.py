@@ -1,6 +1,6 @@
 """
         google play reviews scraper
-        v1.2 - standardized exceptions logging throughout the class, and updated methods to support graceful termination, updated and standardized class docstring alongside MarketauxScraper
+        v1.2.1 - even more standardized log messages
 """
 
 import logging # logging purposes
@@ -138,9 +138,9 @@ class PlayStoreScraper(BaseScraper):
                     validated_review = ReviewPayload.model_validate(review)
                     processed_reviews.append(validated_review) # if there's no ValidationError raised by pydantic, then append the validated review to processed_reviews
                 except ValidationError as e: # if a review data does not match the schema, validation failed so log an error and skip the review
-                    logger.error(f"Model validation error, skipping following review: {e}")
+                    logger.error(f"(Apollo) Model validation error in PlayStoreScraper.process(), skipping following review: {e}")
                 except Exception as e: # just in case if theres any other unexpected error
-                    logger.error(f"Unexpected error occured in process(): {e}\nSkipping following review: {review}")
+                    logger.error(f"(Apollo) Unexpected error occured in PlayStoreScraper.process(): {e}\nSkipping following review: {review}")
             return processed_reviews
         except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt
             logger.info(f"(Apollo) PlayStoreScraper.process() was running, then was stopped by the user (KeyboardInterrupt)")

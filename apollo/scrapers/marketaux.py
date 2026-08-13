@@ -1,6 +1,6 @@
 """
 		marketaux api scraper
-		v1.2 - standardized exceptions logging throughout the class, and updated methods to support graceful termination, updated and standardized class docstring alongside PlayStoreScraper, new default search_target values to be more specific to avoid false positive unrelated search results (like "Boost" accidentally referencing unrelated news)
+		v1.2.1 - even more standardized log messages
 """
 
 import logging # logging purposes
@@ -126,7 +126,7 @@ class MarketauxScraper(BaseScraper):
 		if self.client is None:
 			self.client = httpx.AsyncClient(http2=False) # http2=False bcs marketaux rest api apparently only uses HTTP/1.1, so this is just a safe measure
 		else:
-			logger.info("httpx client was already initialized for this instance")
+			logger.info("(Apollo) httpx client was already initialized for this instance")
 	
 	"""
 		closes the async http client
@@ -200,7 +200,7 @@ class MarketauxScraper(BaseScraper):
 		try:
 			for news_batch in payload:
 				if isinstance(news_batch, Exception): # if guard to catch any asyncio.gather() related exceptions like httpx timeouts
-					logger.error(f"MarketauxScraper.process(): Network exception occurred from asyncio.gather(), most likely due to timeouts")
+					logger.error(f"(Apollo) MarketauxScraper.process(): Network exception occurred from asyncio.gather(), most likely due to timeouts")
 					continue
 				try:
 					news_batch.raise_for_status() # this is a continuation from fetch() explanation above, if the response has an error status code, raise httpx.HTTPStatusError so that it is caught below
@@ -280,7 +280,7 @@ class MarketauxScraper(BaseScraper):
 				return processed_results
 
 			except Exception as e: # basically the very upper level of exception catching when using run()
-				logger.error(f"Error running scraper: {e}")
+				logger.error(f"(Apollo) error running MarketauxScraper: {e}")
 				return [] # returns empty list as a measure to avoid any downstream issue
 			finally:
 				if opened_locally: # now with the same flag above, we can know whether the method was ran individually (locally) or not, if so then close the client with this finally block. context manager client will always be closed in the end through __aexit__() instead of the finally block check
