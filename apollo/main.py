@@ -7,12 +7,14 @@ import logging
 import asyncio
 from asyncio import CancelledError
 import os
+import itertools # just for flattening the results list
 from dotenv import load_dotenv
 from typing import Sequence
 
 from apollo.scrapers.play_store import PlayStoreScraper
 from apollo.scrapers.marketaux import MarketauxScraper
 from apollo.scrapers.base import BaseScraper
+from apollo.schemas import ReviewPayload, FinancialNewsPayload
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -39,15 +41,30 @@ async def main() -> None:
         }
         marketaux_targets: list[str] = ["Maybank", "Boost Bank", "GXBank Malaysia", "TNG eWallet"]
         count: int = 1
+        reviews_events: list[bytes] = [] # a list of bytes to store the reviews events
+        news_events: list[bytes] = [] # a list of bytes to store the news events
 
         scrapers: Sequence[BaseScraper] = [ # future scrapers planning to be added can be put into this list, make sure it inherits BaseScraper tho
             PlayStoreScraper(app_dict=playstore_app_dict),
             MarketauxScraper(params=marketaux_params, search_targets=marketaux_targets)
         ]
-        results = await asyncio.gather(*[scraper.run(count=count) for scraper in scrapers], return_exceptions=True) # polymorphically run the run() method for each scraper in the sequence
+        results = await asyncio.gather(*[scraper.run(count=count) for scraper in scrapers], return_exceptions=True) # polymorphically run the run() method for each scraper in the sequence, allowing exceptions will ensure one exception will not cause every other scrape to fail and stop, maximizes throughput and exceptions will be handled later
 
-        print("Result of results: ") # test
-        print(results)
+        for scraper_output in results: # check if any scraper fails, continuation of asyncio.gather()'s return_exceptions=True explanation above
+            if isinstance(scraper_output, Exception): # if that scraper failed, log it as a warning and skip processing it
+                logger.warning(f"(Apollo) main(), a scraper failed to scrape: {scraper_output}")
+                continue
+            # otherwise process the scraped data
+            for event in scraper_output: # iterate over the scraped data from the current scraper
+                if isinstance(event, ReviewPayload): # reviews goes to reviews_events
+                    reviews_events.append(event.model_dump_json().encode("utf-8")) # kafka only thinks in bytestreams, so yea encoding to utf-8 is good practice
+                elif isinstance(event, FinancialNewsPayload): # news goes to news_events
+                    news_events.append(event.model_dump_json().encode("utf-8"))
+                else: # unexpected type handling
+                    logger.warning(f"(Apollo) main() unexpectedly received '({type(event)})' from 'results' resulting in skipping the following: {event}")
+
+        # print("Result of results: ") # test
+        # print(results)
     except CancelledError:
         logger.info("(Apollo) main() was running, then was stopped by the user (KeyboardInterrupt)")
         # no raise, this main() is the upper most method that catches the CancelledError
