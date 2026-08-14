@@ -6,6 +6,7 @@ dependencies = [
     "aiokafka>=0.14.0",
     "google-play-scraper>=1.2.7",
     "httpx>=0.28.1",
+    "orjson>=3.11.9",
     "psycopg[binary]>=3.3.4",
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.2",

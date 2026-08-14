@@ -1,6 +1,6 @@
 """
 		main entry point and orchestrator for apollo
-		v0.1 - unfinished, testing core orchestration first
+		v0.2 - gonna pass list[dict] instead of list[byte] directly to ApolloKafkaProducer, needed for taking partitioning keys
 """
 
 import logging
@@ -41,8 +41,8 @@ async def main() -> None:
         }
         marketaux_targets: list[str] = ["Maybank", "Boost Bank", "GXBank Malaysia", "TNG eWallet"]
         count: int = 1
-        reviews_events: list[bytes] = [] # a list of bytes to store the reviews events
-        news_events: list[bytes] = [] # a list of bytes to store the news events
+        reviews_events: list[dict] = [] # a list of dict to store the reviews events
+        news_events: list[dict] = [] # a list of dict to store the news events
 
         scrapers: Sequence[BaseScraper] = [ # future scrapers planning to be added can be put into this list, make sure it inherits BaseScraper tho
             PlayStoreScraper(app_dict=playstore_app_dict),
@@ -57,9 +57,9 @@ async def main() -> None:
             # otherwise process the scraped data
             for event in scraper_output: # iterate over the scraped data from the current scraper
                 if isinstance(event, ReviewPayload): # reviews goes to reviews_events
-                    reviews_events.append(event.model_dump_json().encode("utf-8")) # kafka only thinks in bytestreams, so yea encoding to utf-8 is good practice
+                    reviews_events.append(event.model_dump()) # model_dump() will dump the BaseModel to python dictionary, but kafka only thinks in bytestreams, so we will encode to utf-8 in ApolloKafkaProducer.send_events()
                 elif isinstance(event, FinancialNewsPayload): # news goes to news_events
-                    news_events.append(event.model_dump_json().encode("utf-8"))
+                    news_events.append(event.model_dump())
                 else: # unexpected type handling
                     logger.warning(f"(Apollo) main() unexpectedly received '({type(event)})' from 'results' resulting in skipping the following: {event}")
 
