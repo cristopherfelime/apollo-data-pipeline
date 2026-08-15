@@ -1,6 +1,6 @@
 """
         google play reviews scraper
-        v1.2.1 - even more standardized log messages
+        v1.2.1.1 - js some small change
 """
 
 import logging # logging purposes
@@ -87,7 +87,7 @@ class PlayStoreScraper(BaseScraper):
         arguments: self, target (the target or list of targets to scrape), count (number of data to fetch), lang (language of the reviews to fetch, default is ms or malaysian), country (country of the reviews to fetch, default is my or malaysian) idk why malaysia needs ms for lang and my for country but Ok
         EXPECTED TO return: list of dict (raw review data scraped by the package)
     """
-    async def fetch(self, target: str | list[str] | None = None, count: int = 1, lang: str = "ms", country: str = "my") -> list[dict] | list[list[dict]]: # lang and country needs default values to follow Listkov Substitution Principle, PlayStoreScraper is a child class of BaseScraper and BaseScraper doesnt have default values for lang and country, so we need to provide them here, if not it'll raise TypeError: fetch() missing 2 required positional argument: 'lang', 'country' ()
+    async def fetch(self, target: str | list[str] | None=None, count: int=1, lang: str="ms", country: str="my") -> list[dict] | list[list[dict]]: # lang and country needs default values to follow Listkov Substitution Principle, PlayStoreScraper is a child class of BaseScraper and BaseScraper doesnt have default values for lang and country, so we need to provide them here, if not it'll raise TypeError: fetch() missing 2 required positional argument: 'lang', 'country' ()
         responses = []
         target = target or list(self.app_dict.keys()) # if target is None, set it to all app ids in the app_dict
         try:

@@ -1,6 +1,6 @@
 """
 		main entry point and orchestrator for apollo
-		v0.2 - gonna pass list[dict] instead of list[byte] directly to ApolloKafkaProducer, needed for taking partitioning keys
+		v1.0 - completed end-to-end async orchestration, polymorphic scraper execution, OCP (partition_key, event_dict) tuple streaming to ApolloKafkaProducer achieving full SoC, and centralized logging configuration
 """
 
 import logging
@@ -15,6 +15,7 @@ from apollo.scrapers.play_store import PlayStoreScraper
 from apollo.scrapers.marketaux import MarketauxScraper
 from apollo.scrapers.base import BaseScraper
 from apollo.schemas import ReviewPayload, FinancialNewsPayload
+from apollo.kafka.producer import ApolloKafkaProducer
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -41,8 +42,10 @@ async def main() -> None:
         }
         marketaux_targets: list[str] = ["Maybank", "Boost Bank", "GXBank Malaysia", "TNG eWallet"]
         count: int = 1
-        reviews_events: list[dict] = [] # a list of dict to store the reviews events
-        news_events: list[dict] = [] # a list of dict to store the news events
+        events: dict[str, list[tuple[str | None, dict]]] = {
+            "app-reviews-events": [],
+            "market-news-events": [],
+        } # a dict of lists to store kafka topics and their respective (partition_key, event_dict) tuple list
 
         scrapers: Sequence[BaseScraper] = [ # future scrapers planning to be added can be put into this list, make sure it inherits BaseScraper tho
             PlayStoreScraper(app_dict=playstore_app_dict),
@@ -57,11 +60,16 @@ async def main() -> None:
             # otherwise process the scraped data
             for event in scraper_output: # iterate over the scraped data from the current scraper
                 if isinstance(event, ReviewPayload): # reviews goes to reviews_events
-                    reviews_events.append(event.model_dump()) # model_dump() will dump the BaseModel to python dictionary, but kafka only thinks in bytestreams, so we will encode to utf-8 in ApolloKafkaProducer.send_events()
+                    events["app-reviews-events"].append((event.app_id, event.model_dump())) # tuples of (partition_key, event_dict) are collected for generic open-closed principle (OCP) kafka payload batching
                 elif isinstance(event, FinancialNewsPayload): # news goes to news_events
-                    news_events.append(event.model_dump())
+                    events["market-news-events"].append((event.source, event.model_dump()))
                 else: # unexpected type handling
                     logger.warning(f"(Apollo) main() unexpectedly received '({type(event)})' from 'results' resulting in skipping the following: {event}")
+
+        async with ApolloKafkaProducer() as producer:
+            producer_results = await producer.run(events, return_results=True)
+        
+        logger.info(f"(Apollo) Successfully processed play store reviews and marketaux news, and sent all data to Kafka, entire operation was successful:\n {producer_results}")
 
         # print("Result of results: ") # test
         # print(results)
@@ -74,6 +82,13 @@ async def main() -> None:
         return
 
 if __name__ == "__main__":
+
+    # setting the logger config for all instances within apollo will be done here, since main.py is the main entry point
+    logging.basicConfig(
+        level=logging.INFO, # set log severity threshold, the lowest to higher is: debug (10) -> info (20) -> warning (30) -> error (40) -> critical (50), any message with severity lower than this threshold will be ignored
+        format="%(asctime)s [%(levelname)s] %(message)s" # logging format, will include timestamp, log severity level, and the message
+    )
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
