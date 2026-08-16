@@ -1,6 +1,7 @@
 """
         google play reviews scraper
-        v1.2.1.1 - js some small change
+        v1.2.1.2 - if app_dict to if app_dict is not None so something like {} is accepted
+        v1.2.2 - refactored a bit of process() here as well, explicitly map fields into ReviewPayload to safely filter raw google_play_scraper extra fields similar to MarketauxScraper
 """
 
 import logging # logging purposes
@@ -42,7 +43,7 @@ class PlayStoreScraper(BaseScraper):
         EXPECTED TO return: None
     """
     def __init__(self, app_dict: dict=None):
-        if app_dict:
+        if app_dict is not None:
             self.app_dict = app_dict
         else: # default instance app_dict
             self.app_dict = {
@@ -131,11 +132,22 @@ class PlayStoreScraper(BaseScraper):
             processed_reviews = [] # to store all the processed reviews from all the raw api responses for the final return
             for review in payload: # iterate through each of the raw api responses for the current app id
                 if target and (target in self.app_dict.keys()): # if target is provided
-                    review.update({"app_name": self.app_dict.get(target), "app_id": target}) # update the raw review data to include the app name and app id, matching the schema in ReviewPayload
+                    app_name = self.app_dict.get(target)
+                    app_id = target
                 else: # if target is not provided or not in the app_dict
-                    review.update({"app_name": "Unknown App", "app_id": "com.unknown"}) # default to unknown app name and id
+                    app_name = "Unknown App"
+                    app_id = "com.unknown"
                 try: # try to validate each reviews
-                    validated_review = ReviewPayload.model_validate(review)
+                    extracted_review = { # explicitly extract only the fields required by ReviewPayload to avoid extra_forbidden ValidationError from raw scraper fields (such as reviewId, userImage, thumbsUpCount)
+                        "app_id": app_id,
+                        "app_name": app_name,
+                        "userName": review.get("userName"),
+                        "content": review.get("content"),
+                        "score": review.get("score"),
+                        "appVersion": review.get("appVersion") or review.get("reviewCreatedVersion"),
+                        "at": review.get("at")
+                    }
+                    validated_review = ReviewPayload.model_validate(extracted_review)
                     processed_reviews.append(validated_review) # if there's no ValidationError raised by pydantic, then append the validated review to processed_reviews
                 except ValidationError as e: # if a review data does not match the schema, validation failed so log an error and skip the review
                     logger.error(f"(Apollo) Model validation error in PlayStoreScraper.process(), skipping following review: {e}")

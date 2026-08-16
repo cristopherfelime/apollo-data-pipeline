@@ -1,6 +1,6 @@
 """
 		marketaux api scraper
-		v1.2.1 - even more standardized log messages
+		v1.2.3 - refactored a bit of process(), it explicitly maps fields into FinancialNewsPayload to safely filter all raw API extra fields as 'extra' attribute is now fixed in its respective schema
 """
 
 import logging # logging purposes
@@ -208,11 +208,20 @@ class MarketauxScraper(BaseScraper):
 					for news_item in news_dict.get("data", []): # iterating through the list of news items (need to subset to data field since there are other field in the json response (meta))
 						try: # prev ver accidentally put try-except outside of the for loop, this should properly handle individual news item level exception now
 							entities = news_item.get("entities") # to check if entities key exists
+							sentiment_score = None
 							if entities and isinstance(entities, list) and (len(entities) > 0): # if guard for entities, checks if its not None, is a list, and has content
-								news_item["sentiment_score"] = news_item["entities"][0].get("sentiment_score") # and yea so sentiment_score is located in the entities key of each data, where entities store their dictionary data inside a list
-							else:
-								news_item["sentiment_score"] = None # if condition fails, sentiment_score can be set to None, still acceptable in FinancialNewsPayload schema
-							validated_news = FinancialNewsPayload.model_validate(news_item) # any ValidationError will be caught below
+								sentiment_score = entities[0].get("sentiment_score") # sentiment_score is located in the entities key of each data
+							
+							extracted_news = { # explicitly extract only the fields required by FinancialNewsPayload to avoid extra_forbidden ValidationError from raw API fields (like keywords, image_url, description) the one i fixed earlier
+								"uuid": news_item.get("uuid"),
+								"title": news_item.get("title"),
+								"snippet": news_item.get("snippet") or news_item.get("description", ""), # description works as a snippet too lowk, good as a backup before resorting to empty string
+								"url": news_item.get("url"),
+								"source": news_item.get("source"),
+								"sentiment_score": sentiment_score,
+								"published_at": news_item.get("published_at")
+							}
+							validated_news = FinancialNewsPayload.model_validate(extracted_news) # any ValidationError will be caught below
 							processed_news.append(validated_news)
 						# this is individual news item level
 						except ValidationError as e:

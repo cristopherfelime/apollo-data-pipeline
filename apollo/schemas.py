@@ -1,6 +1,6 @@
 """
         pydantic base model schemas for google play reviews and marketaux rest api
-        v1.1 - archived some snippets for now
+        v1.2.1 - changed ConfigDict() model config for both BaseModel parameter from 'extras' to 'extra' ☠️☠️ (thx pytest)
 """
 
 from uuid import UUID, uuid4 # uuid4 is used for auto-generating unique identifiers
@@ -15,17 +15,29 @@ from typing import Annotated # annotated is used for adding metadata to types, i
 # also removes html entities like &lt;, &gt;, &amp;, etc
 HTML_REGEX_CLEANER = re.compile(r"<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});")
 
-""" archived, replaced by pattern in url field validator
-for matching any standard http or https link, used for url field in the financial news payload validation
-HTTP_HTTPS_URL_REGEX = re.compile(r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")
-"""
 # -------------------------------------------------------------------------------------------------------
 
+"""
+    pydantic validation model for google play store app reviews (target topic: app-reviews-events)
+    attributes:
+        event_id (UUID): unique identifier for the review event (auto-generated)
+        app_id (str): application package identifier on google play store (alias: appId)
+        app_name (str): human-readable application name (alias: title)
+        user_name (str): reviewer user name on google play store (alias: userName)
+        review_text (str): cleaned text content of the review (alias: content)
+        rating (int): star rating between 1 and 5 (alias: score)
+        app_version (str | None): application version at the time of review (alias: appVersion)
+        submitted_at (datetime): timestamp of when review was posted in UTC (alias: at)
+        ingested_at (datetime): UTC timestamp of when review was ingested into pipeline
+    methods:
+        clean_review_text -> cleans html tags and whitespace from review text before validation
+        convert_datetime_submitted_at -> standardizes submitted_at datetime to UTC timezone
+"""
 # google play reviews validation model, target topic on kafka: app-reviews-events
 class ReviewPayload(BaseModel): # a class inherits Pydantic's BaseModel to automatically get type checking, data validation, and other useful methods will be used downstream
     model_config = ConfigDict(
         populate_by_name=True, # allows the model to be populated by field names (alias)
-        extras="forbid", # fails or raises ValidationError if there are extra unexpected fields in the data (like if the scraper unexpectedly scrapes a new data)
+        extra="forbid", # fails or raises ValidationError if there are extra unexpected fields in the data (like if the scraper unexpectedly scrapes a new data)
         frozen=True # makes the instance immutable for data safety
     )
 
@@ -73,11 +85,26 @@ class ReviewPayload(BaseModel): # a class inherits Pydantic's BaseModel to autom
     
 # -------------------------------------------------------------------------------------------------------
 
+"""
+    pydantic validation model for marketaux financial news articles (target topic: market-news-events)
+    attributes:
+        event_id (UUID): unique identifier for the news event (auto-generated)
+        article_uuid (str): unique identifier for the news article from marketaux (alias: uuid)
+        title (str): cleaned headline title of the financial news article
+        snippet (str): cleaned summary snippet of the article
+        url (str): valid http or https web url link to the original article source
+        source (str): domain or publisher source name of the financial news article
+        sentiment_score (float | None): sentiment polarity score between -1.0 and 1.0
+        published_at (datetime): original article published timestamp in UTC
+        ingested_at (datetime): UTC timestamp of when article was ingested into pipeline
+    methods:
+        clean_news_text -> cleans html tags and whitespace from article title and snippet before validation
+"""
 # marketaux api validation model, target topic on kafka: market-news-events
 class FinancialNewsPayload(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
-        extras="forbid",
+        extra="forbid",
         frozen=True
     )
 
