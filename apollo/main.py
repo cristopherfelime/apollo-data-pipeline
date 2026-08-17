@@ -23,7 +23,8 @@ load_dotenv()
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 """
-    placeholder
+    main orchestrator function
+    executes all registered scrapers polymorphically, classifies scraped payloads into Kafka topic batches, and streams events to ApolloKafkaProducer
 """
 async def main() -> None:
     try:
@@ -62,7 +63,7 @@ async def main() -> None:
                 if isinstance(event, ReviewPayload): # reviews goes to reviews_events
                     events["app-reviews-events"].append((event.app_id, event.model_dump())) # tuples of (partition_key, event_dict) are collected for generic open-closed principle (OCP) kafka payload batching
                 elif isinstance(event, FinancialNewsPayload): # news goes to news_events
-                    events["market-news-events"].append((event.source, event.model_dump()))
+                    events["market-news-events"].append((event.source, event.model_dump())) # for future reference: {topic1: [(pk1, pk1event1), (pk1, pk1event2), (pk2, pk2event1), (pk2, pk2event2)], topic2: [ ... ]}
                 else: # unexpected type handling
                     logger.warning(f"(Apollo) main() unexpectedly received '({type(event)})' from 'results' resulting in skipping the following: {event}")
 

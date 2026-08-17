@@ -1,11 +1,12 @@
 """
 		kafka producer model
-		v1.2 - refactored run() to stream topic batches concurrently via asyncio.gather(), updated send_event() to use send_and_wait() with KafkaError exception handling and RecordMetadata return type, decoupled _prepare_payload() into generic (partition_key, event_dict) tuples following OCP (achieving full SoC w seed ❤️‍🩹), and implemented async context manager
+		v1.2.1 - added import asyncio to fix missing import in run()...
 """
 
 import logging
 import os
 import orjson # super fast rust written replacement for json
+import asyncio # like how did i miss this
 from dotenv import load_dotenv
 from aiokafka import AIOKafkaProducer # already imports asyncio in under the hood
 from aiokafka.errors import KafkaError
