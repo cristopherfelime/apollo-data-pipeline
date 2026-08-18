@@ -1,4 +1,5 @@
 # docker compose thing
+# v 1.1 - pg-init folder as docker entrypoint for database initialization scripts, also added KAFKA_HEAP_OPTS to kafka_broker1
 # used for running applications/platforms that requires multiple containers to run
 
 services:
@@ -11,8 +12,8 @@ services:
       # takes in value of POSTGRES_PORT from .env file
       - ${POSTGRES_PORT}:5432
     volumes:
-      # persistent volume, so that data is not lost when container is recreated
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data # persistent volume, so that data is not lost when container is recreated
+      - ./pg-init:/docker-entrypoint-initdb.d # mounts the pg-init directory (containing initialization sql scripts) to the container's entrypoint directory, so that the sql scripts are executed when the container is created
     environment:
       # environment variables to be set for the postgres container
       - POSTGRES_USER=${POSTGRES_USER}
@@ -37,6 +38,7 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER" # specifies which listener name from the KAFKA_LISTENERS list must be used exclusively for internal controller communication
       KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL" # specifies the listener used for data replication and synchronization between brokers
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT" # maps each listener to its security protocol (sort of type formatting u can say)
+      KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS}" # forgot to add this, controls the java virtual machine heap memory under the hood
 
       # JUST FOR THIS SINGLE NODE SETUP:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # configures the internal __consumer_offsets tracking topic to only maintain 1 copy instead of expecting a multi-broker cluster default of 3

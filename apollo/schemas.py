@@ -111,7 +111,7 @@ class FinancialNewsPayload(BaseModel):
     event_id: Annotated[UUID, Field(default_factory=uuid4)]
     article_uuid: Annotated[str, Field(alias="uuid")] # specific article UUID
     title: Annotated[str, Field(min_length=5, max_length=500)] # title of article
-    snippet: Annotated[str, Field(max_length=2000)] # summary of article
+    snippet: Annotated[str, Field(max_length=2000)] # summary of article, description field is also a good alternative for snippet, as we've implemented this in MarketauxScraper
     url: Annotated[str, Field(pattern=r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")]
     source: Annotated[str, Field(description="financial news website source")]
     sentiment_score: Annotated[float | None, Field(ge=-1.0, le=1.0)] # news sentiment score is between -1 and 1, heard that sometimes its not provided so None is allowed
