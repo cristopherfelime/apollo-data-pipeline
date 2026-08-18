@@ -1,0 +1,4 @@
+# to show that SQL is used in the repo stat
+*.sql linguist-detectable=true
+*.sql linguist-documentation=false
+*.sql linguist-vendored=false
