@@ -1,6 +1,7 @@
 """
 		kafka producer model
 		v1.2.1 - added import asyncio to fix missing import in run()...
+        v1.2.1.1 - start() now checks if _producer is an instance of AIOKafkaProducer or not
 """
 
 import logging
@@ -65,7 +66,7 @@ class ApolloKafkaProducer:
         EXPECTED TO return: None
     """
     async def start(self) -> None:
-        if self._producer is None: # checks if the producer is not initialized
+        if (self._producer is None) or (not isinstance(self._producer, AIOKafkaProducer)): # checks if the producer is not initialized
             try: # attempt to initialize the producer instance and start them
                 self.initialize()
                 await self._producer.start()
