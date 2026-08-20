@@ -5,8 +5,8 @@
 """
 
 import pytest
-from unittest.mock import patch, AsyncMock # AsyncMock is to mock asynchronous (coroutines-based) objects here, will be used to mock httpx.AsyncClient later
 import httpx
+from unittest.mock import patch, AsyncMock # AsyncMock is to mock asynchronous (coroutines-based) objects here, will be used to mock httpx.AsyncClient later
 from datetime import datetime, timezone
 from uuid import UUID
 

@@ -5,12 +5,12 @@
 """
 
 import pytest
-from unittest.mock import patch, AsyncMock # AsyncMock is to mock asynchronous (coroutines-based) objects here, will be used to mock httpx.AsyncClient later
-from dotenv import load_dotenv
 import os
+import orjson
 from uuid import uuid4
 from datetime import datetime, timezone
-import orjson
+from unittest.mock import patch, AsyncMock # AsyncMock is to mock asynchronous (coroutines-based) objects here, will be used to mock httpx.AsyncClient later
+from dotenv import load_dotenv
 from aiokafka import AIOKafkaProducer
 from aiokafka.errors import KafkaError
 from aiokafka.structs import RecordMetadata, TopicPartition
@@ -169,7 +169,7 @@ async def test_kafka_producer_context_manager() -> None:
         # attempt to start the kafka producer instance
         async with default_producer as p: # the context manager itself
             assert p is default_producer # testing the producer instance if it was set properly
-            assert default_producer._producer is mock_producer # the mock producer now, should automatically be opened since context manager (__aenter__)
+            assert p._producer is mock_producer # the mock producer now, should automatically be opened since context manager (__aenter__)
 
         mock_producer.stop.assert_awaited_once() # __aexit__ automatically calls the stop method and tests if it awaited producer.stop()
         assert default_producer._producer is None # check if producer is None after stop
@@ -184,8 +184,8 @@ async def test_kafka_producer_context_manager() -> None:
     verifies nested dictionary structure, partition key byte encoding, and orjson byte serialization
 """
 def test_kafka_producer_prepare_payload_valid(sample_events_dict) -> None:
-    producer = ApolloKafkaProducer()
-    payload = producer._prepare_payload(sample_events_dict)
+    default_producer = ApolloKafkaProducer()
+    payload = default_producer._prepare_payload(sample_events_dict)
     
     assert isinstance(payload, dict) # verifies payload is a dictionary
     assert "app-reviews-events" in payload # verifies review topic in payload
@@ -226,8 +226,8 @@ def test_kafka_producer_prepare_payload_valid(sample_events_dict) -> None:
     verifies that None, empty string, whitespace string, and non-string keys fallback to b"dlq", while valid keys are lowercased and stripped
 """
 def test_kafka_producer_prepare_payload_dlq_fallback(sample_edge_case_events_dict) -> None:
-    producer = ApolloKafkaProducer()
-    payload = producer._prepare_payload(sample_edge_case_events_dict)
+    default_producer = ApolloKafkaProducer()
+    payload = default_producer._prepare_payload(sample_edge_case_events_dict)
 
     assert isinstance(payload, dict) # verifies payload is a dictionary
     review_topic_payload = payload["app-reviews-events"] # subset to app reviews topic to check partition keys
@@ -246,8 +246,8 @@ def test_kafka_producer_prepare_payload_dlq_fallback(sample_edge_case_events_dic
     verifies individual malformed events are skipped while valid events in the same topic are preserved
 """
 def test_kafka_producer_prepare_payload_malformed_event_skipped(sample_malformed_events_dict) -> None:
-    producer = ApolloKafkaProducer()
-    payload = producer._prepare_payload(sample_malformed_events_dict)
+    default_producer = ApolloKafkaProducer()
+    payload = default_producer._prepare_payload(sample_malformed_events_dict)
 
     assert isinstance(payload, dict)
     review_topic_payload = payload["app-reviews-events"]
@@ -260,9 +260,9 @@ def test_kafka_producer_prepare_payload_malformed_event_skipped(sample_malformed
     verifies error logging and returning empty dictionary {}
 """
 def test_kafka_producer_prepare_payload_invalid_input() -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     # passing a non-dict type (e.g. list or string)
-    payload = producer._prepare_payload(["not", "a", "dict"]) # type: ignore
+    payload = default_producer._prepare_payload(["not", "a", "dict"]) # type: ignore
     assert payload == {}
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -276,13 +276,13 @@ def test_kafka_producer_prepare_payload_invalid_input() -> None:
 """
 @pytest.mark.anyio
 async def test_kafka_producer_send_event_success(sample_review_event, sample_record_metadata) -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
     mock_producer.send_and_wait.return_value = sample_record_metadata # set send_and_wait to return sample_record_metadata instead
-    producer._producer = mock_producer
+    default_producer._producer = mock_producer
 
     event_bytes = orjson.dumps(sample_review_event) # taking that one sample_review_event and serializing them
-    metadata = await producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app") # setting topic, value, and key, sends that singular event above
+    metadata = await default_producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app") # setting topic, value, and key, sends that singular event above
 
     assert metadata is sample_record_metadata # verifies if the returned metadata is the exact same as sample_record_metadata
     assert metadata.topic == "app-reviews-events" # verifies metadata topic
@@ -301,8 +301,8 @@ async def test_kafka_producer_send_event_success(sample_review_event, sample_rec
 """
 @pytest.mark.anyio
 async def test_kafka_producer_send_event_standalone_lifecycle(sample_review_event, sample_record_metadata) -> None:
-    producer = ApolloKafkaProducer()
-    assert producer._producer is None # should be initially None
+    default_producer = ApolloKafkaProducer()
+    assert default_producer._producer is None # should be initially None
 
     # same mock setup stuff
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
@@ -311,12 +311,12 @@ async def test_kafka_producer_send_event_standalone_lifecycle(sample_review_even
     with patch("apollo.kafka.producer.AIOKafkaProducer", return_value=mock_producer): # patch AIOKafkaProducer
         # testing opened_locally so no context manager, start() and stop() calling test is ran below
         event_bytes = orjson.dumps(sample_review_event) # take that one sample_review_event and serialize them
-        metadata = await producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app") # setting topic, value, and key, sends that singular event above
+        metadata = await default_producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app") # setting topic, value, and key, sends that singular event above
 
         assert metadata is sample_record_metadata # verifies if the returned metadata is the exact same as sample_record_metadata
         mock_producer.start.assert_awaited_once() # verifies producer started locally
         mock_producer.stop.assert_awaited_once() # verifies producer stopped locally in finally
-        assert producer._producer is None # verifies producer reset to None
+        assert default_producer._producer is None # verifies producer reset to None
 
 """
     DELIVERY TEST (BROKER KAFKA ERROR RESILIENCE)
@@ -325,13 +325,13 @@ async def test_kafka_producer_send_event_standalone_lifecycle(sample_review_even
 """
 @pytest.mark.anyio
 async def test_kafka_producer_send_event_kafka_error(sample_review_event) -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
     mock_producer.send_and_wait.side_effect = KafkaError("Broker unavailable / delivery timeout") # instead of returning something, it wil raise KafkaError
-    producer._producer = mock_producer
+    default_producer._producer = mock_producer
 
     event_bytes = orjson.dumps(sample_review_event)
-    metadata = await producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app")
+    metadata = await default_producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app")
 
     assert metadata is None # verifies None returned on KafkaError
 
@@ -342,13 +342,13 @@ async def test_kafka_producer_send_event_kafka_error(sample_review_event) -> Non
 """
 @pytest.mark.anyio
 async def test_kafka_producer_send_event_unexpected_error(sample_review_event) -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
     mock_producer.send_and_wait.side_effect = Exception("Unexpected network socket error") # similar to above but this one tryna simulate an unexpected error on send
-    producer._producer = mock_producer
+    default_producer._producer = mock_producer
 
     event_bytes = orjson.dumps(sample_review_event)
-    metadata = await producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app")
+    metadata = await default_producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app")
 
     assert metadata is None
 
@@ -363,12 +363,12 @@ async def test_kafka_producer_send_event_unexpected_error(sample_review_event) -
 """ # if werent for this we would have never imported asyncio in producer.py and nothing will be streamed to kafka due to NameError 😭☠️🥀
 @pytest.mark.anyio
 async def test_kafka_producer_run_success_with_results(sample_events_dict, sample_record_metadata) -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
     mock_producer.send_and_wait.return_value = sample_record_metadata
 
     with patch("apollo.kafka.producer.AIOKafkaProducer", return_value=mock_producer):
-        results = await producer.run(sample_events_dict, return_results=True) # here, return_results is set to True
+        results = await default_producer.run(sample_events_dict, return_results=True) # here, return_results is set to True
 
         assert results == { # verifies the return value is the exact same as sample_events_dict, having 4 events total from 2 partition keys in each topic
             "app-reviews-events": 4, # 4 review events streamed successfully
@@ -377,7 +377,7 @@ async def test_kafka_producer_run_success_with_results(sample_events_dict, sampl
         assert mock_producer.send_and_wait.call_count == 8 # 8 total events streamed, 4 per topic with 2 partition keys
         mock_producer.start.assert_awaited_once() # opened locally, producer.run() is the one calling start() without using context manager
         mock_producer.stop.assert_awaited_once() # closed locally, same as above as the finally block in producer.run()
-        assert producer._producer is None # producer should be reset to None after producer.run() completes
+        assert default_producer._producer is None # producer should be reset to None after producer.run() completes
 
 """
     PIPELINE TEST
@@ -386,12 +386,12 @@ async def test_kafka_producer_run_success_with_results(sample_events_dict, sampl
 """
 @pytest.mark.anyio
 async def test_kafka_producer_run_without_results(sample_events_dict, sample_record_metadata) -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
     mock_producer.send_and_wait.return_value = sample_record_metadata
 
     with patch("apollo.kafka.producer.AIOKafkaProducer", return_value=mock_producer):
-        results = await producer.run(sample_events_dict, return_results=False)
+        results = await default_producer.run(sample_events_dict, return_results=False)
 
         assert results is None # in here, it verifies None returned when return_results is False
         assert mock_producer.send_and_wait.call_count == 8 # 8 total events streamed
@@ -403,11 +403,11 @@ async def test_kafka_producer_run_without_results(sample_events_dict, sample_rec
 """
 @pytest.mark.anyio
 async def test_kafka_producer_run_empty_payload() -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
 
     with patch("apollo.kafka.producer.AIOKafkaProducer", return_value=mock_producer):
-        results = await producer.run({}, return_results=True)
+        results = await default_producer.run({}, return_results=True)
         assert results is None # empty payload returns None
         mock_producer.send_and_wait.assert_not_called() # verifies that no network calls were made, meaning run() successfully stopped early
 
@@ -418,7 +418,7 @@ async def test_kafka_producer_run_empty_payload() -> None:
 """
 @pytest.mark.anyio
 async def test_kafka_producer_run_partial_broker_failure(sample_events_dict, sample_record_metadata) -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
     
     # side_effect can also be useful to return different values for sequential calls to make them more realistic (also allows that KafkaError to be raised), just like below. return_values will just return the entire list
@@ -434,7 +434,7 @@ async def test_kafka_producer_run_partial_broker_failure(sample_events_dict, sam
     ]
 
     with patch("apollo.kafka.producer.AIOKafkaProducer", return_value=mock_producer):
-        results = await producer.run(sample_events_dict, return_results=True)
+        results = await default_producer.run(sample_events_dict, return_results=True)
 
         assert results is not None
         # 3 successes in app-reviews-events (1 failed out of 4), 4 successes in market-news-events
@@ -447,12 +447,12 @@ async def test_kafka_producer_run_partial_broker_failure(sample_events_dict, sam
 """
 @pytest.mark.anyio
 async def test_kafka_producer_run_unexpected_error(sample_events_dict) -> None:
-    producer = ApolloKafkaProducer()
+    default_producer = ApolloKafkaProducer()
     mock_producer = AsyncMock(spec=AIOKafkaProducer)
 
     with patch("apollo.kafka.producer.AIOKafkaProducer", return_value=mock_producer):
-        with patch.object(producer, "_prepare_payload", side_effect=Exception("Fatal serialization crash")): # made it so that producer calling _prepare_payload() will instead raise an unexpected Exception
-            results = await producer.run(sample_events_dict, return_results=True)
+        with patch.object(default_producer, "_prepare_payload", side_effect=Exception("Fatal serialization crash")): # made it so that producer calling _prepare_payload() will instead raise an unexpected Exception
+            results = await default_producer.run(sample_events_dict, return_results=True)
             assert results == {} # verifies that it return an empty dict on fatal error
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------

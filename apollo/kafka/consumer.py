@@ -56,7 +56,7 @@ class ApolloKafkaConsumer:
         EXPECTED TO return: None
     """
     def initialize(self) -> None:
-        if (self._consumer is None) or (not isinstance(self._consumer, AIOKafkaConsumer)):
+        if self._consumer is None:
             self._consumer = AIOKafkaConsumer(
                 *self._topics, # unpacking the topics list
                 bootstrap_servers=self.bootstrap_servers,
@@ -72,7 +72,7 @@ class ApolloKafkaConsumer:
         EXPECTED TO return: None
     """
     async def start(self) -> None:
-        if (self._consumer is None) or (not isinstance(self._consumer, AIOKafkaConsumer)):
+        if self._consumer is None:
             try:
                 self.initialize()
                 await self._consumer.start()
@@ -89,7 +89,7 @@ class ApolloKafkaConsumer:
         EXPECTED TO return: None
     """
     async def stop(self) -> None:
-        if (self._consumer is None) or (not isinstance(self._consumer, AIOKafkaConsumer)):
+        if self._consumer is None:
             logger.info(f"(Apollo) cannot stop Kafka Consumer as it is not running")
         else:
             try:
@@ -123,7 +123,7 @@ class ApolloKafkaConsumer:
     """
     async def get_batch(self, max_records: int=100, timeout_ms: int=1000) -> list[ConsumerRecord]: # timeout is 1 second with max records of 100, our scrapers scrapes little-by-little (around 16 events per run approx), so ts may cause slight delay for smaller scrapes like ts but not a problem when we increase the size (if my marketaux api token is enough that is)
         try:
-            if (self._consumer is None) or (not isinstance(self._consumer, AIOKafkaConsumer)): # unlike kafka producer nature that accepts one-shot sends, consumers needs to be running to be able to consume as a group, we're also manually committing and kafka will not need to rebalance consumer groups
+            if self._consumer is None: # unlike kafka producer nature that accepts one-shot sends, consumers needs to be running to be able to consume as a group, we're also manually committing and kafka will not need to rebalance consumer groups
                 await self.start()
 
             return_batch: list[ConsumerRecord] = []
@@ -153,7 +153,7 @@ class ApolloKafkaConsumer:
     """
     async def commit(self) -> None:
         try:
-            if (self._consumer is None) or (not isinstance(self._consumer, AIOKafkaConsumer)):
+            if self._consumer is None:
                 raise Exception("Kafka Consumer is not even initialized")
             await self._consumer.commit() # committing the offset manually (as we disabled auto commit in constructor above)
             logger.info("(Apollo) Kafka Consumer offset committed successfully")
