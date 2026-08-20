@@ -29,6 +29,8 @@ async def main():
                 """)
                 tables = await cur.fetchall()
                 print("all public tables: ", tables)
+                await pool.close()
+                
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS staging_reviews (
     submitted_at TIMESTAMPTZ NOT NULL, -- TIMESTAMPTZ standardizes to UTC i heard, so better than TIMESTAMP here
     ingested_at TIMESTAMPTZ NOT NULL, -- time when data was ingested (scraped to be exact)
     is_cleaned BOOLEAN NOT NULL DEFAULT FALSE, -- this one is particularly for artemis later
+    is_embedded BOOLEAN NOT NULL DEFAULT FALSE, -- same as above
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- time when this message was pushed to the db
     
     -- constraints
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS staging_marketaux (
     published_at TIMESTAMPTZ NOT NULL,
     ingested_at TIMESTAMPTZ NOT NULL,
     is_cleaned BOOLEAN NOT NULL DEFAULT FALSE,
+    is_embedded BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- constraints
@@ -55,6 +57,7 @@ CREATE TABLE IF NOT EXISTS staging_marketaux (
 
 -- indexes for fast lookup
 
+-- for data cleaning workers in artemis
 -- partial index for finding uncleaned play store reviews 
 CREATE INDEX IF NOT EXISTS idx_staging_reviews_uncleaned -- partial indexing on created_at for only uncleaned records, so that artemis only scans the needed record for cleaning (tbd as well)
 ON staging_reviews(created_at)
@@ -64,3 +67,14 @@ WHERE is_cleaned = FALSE;
 CREATE INDEX IF NOT EXISTS idx_staging_marketaux_uncleaned -- same purpose as above
 ON staging_marketaux(created_at)
 WHERE is_cleaned = FALSE;
+
+-- for text embedding/vectorizer workers in artemis
+-- partial index for finding cleaned but not yet embedded play store reviews 
+CREATE INDEX IF NOT EXISTS idx_staging_reviews_unembedded -- another partial indexing
+ON staging_reviews(created_at)
+WHERE (is_cleaned = TRUE) AND (is_embedded = FALSE);
+
+-- partial index for finding cleaned but not yet embedded marketaux news
+CREATE INDEX IF NOT EXISTS idx_staging_marketaux_unembedded
+ON staging_marketaux(created_at)
+WHERE (is_cleaned = TRUE) AND (is_embedded = FALSE);
