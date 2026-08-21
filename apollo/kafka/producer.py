@@ -54,7 +54,7 @@ class ApolloKafkaProducer:
         EXPECTED TO return: None
     """
     def initialize(self) -> None:
-        if (self._producer is None) or (not isinstance(self._producer, AIOKafkaProducer)): # checks if producer is not initialized or not an AIOKafkaProducer instance
+        if self._producer is None: # checks if producer is not initialized or not an AIOKafkaProducer instance
             self._producer = AIOKafkaProducer(
                 bootstrap_servers=self.bootstrap_servers
             )
@@ -66,7 +66,7 @@ class ApolloKafkaProducer:
         EXPECTED TO return: None
     """
     async def start(self) -> None:
-        if (self._producer is None) or (not isinstance(self._producer, AIOKafkaProducer)): # checks if the producer is not initialized
+        if self._producer is None: # checks if the producer is not initialized
             try: # attempt to initialize the producer instance and start them
                 self.initialize()
                 await self._producer.start()

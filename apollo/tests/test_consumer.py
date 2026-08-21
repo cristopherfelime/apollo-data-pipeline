@@ -233,7 +233,64 @@ async def test_kafka_consumer_get_batch_valid(sample_getmany_batch_dict, sample_
             assert record in sample_consumer_records
 
 """
+    PROCESSING TEST (EMPTY RESPONSE)
+    tests ApolloKafkaConsumer.get_batch() with empty batch response sample sample_empty_getmany_batch
+"""
+@pytest.mark.anyio
+async def test_kafka_consumer_get_batch_empty(sample_empty_getmany_batch) -> None:
+    default_consumer = ApolloKafkaConsumer()
+    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    mock_consumer.getmany.return_value = sample_empty_getmany_batch
+
+    with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
+        batch = await default_consumer.get_batch()
+
+        mock_consumer.getmany.assert_awaited_once()
+        assert batch == [] # verifies if an empty list was indeed returned
+
+"""
+    PROCESSING TEST (PARTIAL TOPIC RESPONSE)
+    tests ApolloKafkaConsumer.get_batch() returning nothing on one topic, and valid ConsumerRecord on the other
+"""
+@pytest.mark.anyio
+async def test_kafka_consumer_get_batch_partial_topics_failure(sample_consumer_records) -> None:
+    default_consumer = ApolloKafkaConsumer()
+    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    
+    # the partial return batch
+    partial_batch = {
+        TopicPartition("app-reviews-events", 0): [sample_consumer_records[0], sample_consumer_records[1]], # app-reviews-events is valid, see how nothing is returned for market news 
+    }
+    mock_consumer.getmany.return_value = partial_batch
+
+    with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
+        batch = await default_consumer.get_batch()
+        mock_consumer.getmany.assert_awaited_once()
+        assert isinstance(batch, list) and (len(batch) == 2) # checks if the return is still a list and only returns 2 ConsumerRecords in total
+
+"""
+    PROCESSING TEST (ERROR HANDLING)
+    tests ApolloKafkaConsumer.get_batch() handling unexpected fatal exception
+"""
+@pytest.mark.anyio
+async def test_kafka_consumer_get_batch_unexpected_error() -> None:
+    default_consumer = ApolloKafkaConsumer()
+    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+
+    with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
+        with patch.object(mock_consumer, "getmany", side_effect=Exception("Fatal something crash")): # get_batch() calls getmany() from AIOKafkaConsumer (which is mocked as mock_consumer here), modify it to raise an Exception instead
+            batch = await default_consumer.get_batch()
+
+            mock_consumer.getmany.assert_awaited_once()
+            assert batch == [] # unexpected error should return empty list
+
+
+"""
     TODO:
-    - more get_batch() tests: empty getmany() return, and unexpected exception edge cases tests
     - commit() tests: uninitialized consumer unexpected commit and other exceptions edge cases tests
 """
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    pass
