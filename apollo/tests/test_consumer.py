@@ -7,6 +7,7 @@
 import pytest
 import os
 import orjson
+import logging # for exception catching test in commit()
 from uuid import uuid4
 from datetime import datetime, timezone
 from asyncio import CancelledError
@@ -284,11 +285,69 @@ async def test_kafka_consumer_get_batch_unexpected_error() -> None:
             mock_consumer.getmany.assert_awaited_once()
             assert batch == [] # unexpected error should return empty list
 
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# commit() method tests
 
 """
-    TODO:
-    - commit() tests: uninitialized consumer unexpected commit and other exceptions edge cases tests
+    COMMIT TEST (SUCCESS)
+    tests ApolloKafkaConsumer.commit successfully committing offsets with broker ACK
 """
+@pytest.mark.anyio
+async def test_kafka_consumer_commit_success() -> None:
+    default_consumer = ApolloKafkaConsumer()
+    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
+        await default_consumer.start()
+        await default_consumer.commit()
+        mock_consumer.commit.assert_awaited_once()
+
+"""
+    COMMIT TEST (UNINITIALIZED)
+    tests ApolloKafkaConsumer.commit successfully raising Exception when consumer uninitialized
+"""
+@pytest.mark.anyio
+async def test_kafka_consumer_commit_uninitialized(caplog) -> None:
+    default_consumer = ApolloKafkaConsumer()
+    with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=None):
+        with caplog.at_level(logging.ERROR): # captures any logger message at ERROR severity
+            await default_consumer.start()
+            await default_consumer.commit()
+            assert "Kafka Consumer is not even initialized" in caplog.text # so we can use them in assertion here to check for raised Exceptions when the unit already handled them
+
+"""
+    COMMIT TEST (COMMIT FAIL HANDLING)
+    tests ApolloKafkaConsumer.commit handling unexpected failure from consumer.commit()
+"""
+@pytest.mark.anyio
+async def test_kafka_consumer_commit_fail(caplog) -> None:
+    default_consumer = ApolloKafkaConsumer()
+    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
+        with patch.object(mock_consumer, "commit", side_effect=KafkaError("commit died bruh")):
+            with caplog.at_level(logging.ERROR):
+                await default_consumer.start()
+                await default_consumer.commit()
+
+                assert "KafkaError: commit died bruh" in caplog.text
+                mock_consumer.commit.assert_awaited_once() # tests if it actually ran
+
+"""
+    COMMIT TEST (ERROR HANDLING)
+    tests ApolloKafkaConsumer.commit handling other exceptions than KafkaError
+"""
+@pytest.mark.anyio
+async def test_kafka_consumer_commit_unexpected_error(caplog) -> None:
+    default_consumer = ApolloKafkaConsumer()
+    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
+        with patch.object(mock_consumer, "commit", side_effect=Exception("another commit error")):
+            with caplog.at_level(logging.ERROR):
+                await default_consumer.start()
+                await default_consumer.commit()
+
+                assert "another commit error" in caplog.text
+                mock_consumer.commit.assert_awaited_once()
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
