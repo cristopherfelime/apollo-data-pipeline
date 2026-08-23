@@ -10,6 +10,8 @@ import orjson
 from asyncio import CancelledError
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
+from aiokafka.structs import ConsumerRecord
+from typing import Any
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -103,6 +105,65 @@ class PostgresPersister:
     """
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.stop()
+    
+    """
+        method docstring placeholder
+    """
+    # btw same like _prepare_payload not async cuz no need to interact with network i/o client stuff shi
+    def parse_events(self, list_events: list[ConsumerRecord]) -> dict[str, list[dict[str, Any]]]: # so like {topic1: ({event_metadata1_1: event_data1_1}, {event_metadata1_2: event_data1_2}, ...), topic2: ({event_metadata2_1: event_data2_1}, {event_metadata2_2: event_data2_2}, ...), ...}
+        try:
+            """
+                so they say uh:
+                class aiokafka.structs.ConsumerRecord(
+                    topic: 'str',
+                    partition: 'int',
+                    offset: 'int',
+                    timestamp: 'int',
+                    timestamp_type: 'int',
+                    key: 'KT | None',
+                    value: 'VT | None',
+                    checksum: 'int | None',
+                    serialized_key_size: 'int',
+                    serialized_value_size: 'int',
+                    headers: 'Sequence[tuple[str, bytes]]'
+                )
+                we serialized key anv value into bytes in ApolloKafkaProducer so i assume we also receive them in bytes here
+                for now ts method just looks for topic and value
+            """
+            parse_result: dict[str, list[dict[str, Any]]] = {} # return result
+            
+            for event in list_events: # iterates over each event
+                try:
+                    if not event.value:
+                        logger.warning(f"(Apollo) Found an empty event record, skipping")
+                        continue
+                    event_data: dict[str, Any] = orjson.loads(event.value) # so we deserialze each event, getting their metadata and data
+                    parse_result.setdefault(event.topic, []).append(event_data) # appends it to its corresponding topic, creating a new key topic and its list if not exist, similar thing in ApolloKafkaProducer as well happened in _prepare_payload() go check it out
+                except CancelledError:
+                    logger.info(f"(Apollo) Postgres persister parse_consumer() inside consumer loop was running, then was stopped by the user (KeyboardInterrupt)")
+                    raise
+                except Exception as e:
+                    logger.error(f"(Apollo) Error while Postgres persister was parsing an event record, skipping it: {e}")
+                    continue
+            return parse_result # and now we return the result
+        except CancelledError:
+            logger.info(f"(Apollo) Postgres persister parse_consumer() was running, then was stopped by the user (KeyboardInterrupt)")
+            raise
+        except Exception as e:
+            logger.error(f"(Apollo) Error while Postgres persister was parsing consumer records: {e}")
+            return {}
+    
+    """
+        method docstring placeholder
+    """
+    async def persist_events(self, parsed_events: dict[str, list[dict[str, Any]]]) -> None:
+        try:
+            pass
+        except CancelledError:
+            logger.info(f"(Apollo) Postgres persister persist_events() was running, then was stopped by the user (KeyboardInterrupt)")
+            raise
+        except Exception as e:
+            logger.error(f"(Apollo) Error while Postgres persister was pushing to database: {e}")
 
 
 if __name__ == "__main__":
