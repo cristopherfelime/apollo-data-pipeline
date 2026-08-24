@@ -1,6 +1,6 @@
 """
     unit testing script for ApolloKafkaConsumer in consumer.py
-    v0.1
+    v1.0
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
