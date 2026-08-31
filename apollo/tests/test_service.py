@@ -195,29 +195,47 @@ def sample_custom_persister_config():
         "max_size": 15
     }
 
-""" ts to be tested soon
-    @pytest.fixture
-    def mock_async_pool():
-        '''synthetic mock AsyncConnectionPool with nested connection and cursor async context managers'''
-        mock_pool = MagicMock(spec=AsyncConnectionPool)
-        mock_pool.closed = False
-        mock_pool.open = AsyncMock()
-        mock_pool.close = AsyncMock()
+@pytest.fixture
+def mock_async_pool():
+    '''synthetic mock AsyncConnectionPool with nested connection and cursor async context managers'''
+    mock_pool = MagicMock(spec=AsyncConnectionPool) # yea so AsyncConnectionPool itself is not asynchronous and so does its connection() method (we don't await when using them) so we use MagicMock, but that connection() method does return an object that uses async context manager protocol (aenter and aexit)
+    mock_pool.closed = False
+    mock_pool.open = AsyncMock() # unlike above, all below must be awaited so use AsyncMock
+    mock_pool.close = AsyncMock()
 
-        mock_conn = AsyncMock()
-        mock_cur = AsyncMock()
-        mock_cur.executemany = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cur = AsyncMock()
+    mock_cur.executemany = AsyncMock()
 
-        # setup cursor async context manager
-        mock_conn.cursor.return_value.__aenter__ = AsyncMock(return_value=mock_cur)
-        mock_conn.cursor.return_value.__aexit__ = AsyncMock(return_value=None)
+    # setup cursor async context manager
+    mock_conn.cursor.return_value.__aenter__ = AsyncMock(return_value=mock_cur)
+    mock_conn.cursor.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        # setup connection async context manager
-        mock_pool.connection.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_pool.connection.return_value.__aexit__ = AsyncMock(return_value=None)
+    # setup connection async context manager (continuation from above, here is what i meant by it returning an object that uses async context manager protocol)
+    mock_pool.connection.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.connection.return_value.__aexit__ = AsyncMock(return_value=None)
 
-        return mock_pool, mock_conn, mock_cur
+    return mock_pool, mock_conn, mock_cur
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# management tests
 """
+    MANAGEMENT TEST
+    tests PostgresPersister initialization with default and custom connection pool sizes (min_size and max_size)
+"""
+def test_postgres_persister_init_default_and_custom(sample_custom_persister_config):
+    # default init
+    default_persister = PostgresPersister()
+    assert default_persister.min_size == 1 # test default value being 1
+    assert default_persister.max_size == 10 # ts 10
+    assert default_persister._pool is None # and pool should have lazy initialization
+
+    # custom init
+    custom_persister = PostgresPersister(**sample_custom_persister_config)
+    assert custom_persister.min_size == sample_custom_persister_config["min_size"]
+    assert custom_persister.max_size == sample_custom_persister_config["max_size"]
+    assert custom_persister._pool is None
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
