@@ -1,6 +1,6 @@
 """
     unit testing script for ApolloKafkaConsumer in consumer.py
-    v1.0
+    v1.1 - added start method calling assertion for mock consumer in lifecycle and context manager tests
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -179,6 +179,7 @@ async def test_kafka_cosumer_start_and_stop() -> None:
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         # attempt to start the kafka consumer instance
         await default_consumer.start()
+        mock_consumer.start.assert_awaited_once()
         assert default_consumer._consumer is not None
 
         # attempt to stop above
@@ -200,6 +201,7 @@ async def test_kafka_consumer_context_manager() -> None:
         # attempt to start with context manager
         async with default_consumer as c:
             assert c is default_consumer
+            mock_consumer.start.assert_awaited_once()
             assert c._consumer is mock_consumer
 
         # should automatically stop after context manager

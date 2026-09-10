@@ -1,6 +1,6 @@
 """
     unit testing script for ApolloKafkaProducer in producer.py
-    v1.0 - unit tests for initialization, connection lifecycle, async context manager, payload serialization with DLQ fallback, single event delivery, and concurrent multi-topic streaming pipeline
+    v1.1 - added start method calling assertion for mock producer in lifecycle and context manager tests
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -148,6 +148,7 @@ async def test_kafka_producer_start_and_stop() -> None:
     with patch("apollo.kafka.producer.AIOKafkaProducer", return_value=mock_producer):
         # attempt to start the kafka producer instance
         await default_producer.start()
+        mock_producer.start.assert_awaited_once()
         assert default_producer._producer is not None # check if producer is not None after start
 
         # attempt to stop the above
@@ -169,6 +170,7 @@ async def test_kafka_producer_context_manager() -> None:
         # attempt to start the kafka producer instance
         async with default_producer as p: # the context manager itself
             assert p is default_producer # testing the producer instance if it was set properly
+            mock_producer.start.assert_awaited_once()
             assert p._producer is mock_producer # the mock producer now, should automatically be opened since context manager (__aenter__)
 
         mock_producer.stop.assert_awaited_once() # __aexit__ automatically calls the stop method and tests if it awaited producer.stop()

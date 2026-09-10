@@ -239,5 +239,52 @@ def test_postgres_persister_init_default_and_custom(sample_custom_persister_conf
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
+# lifecycle and context manager tests
+
+"""
+    LIFECYCLE TEST
+    tests PostgresPersister start and stop methods
+"""
+@pytest.mark.anyio
+async def test_postgres_persister_start_and_stop(mock_async_pool) -> None:
+    default_persister = PostgresPersister()
+    assert default_persister._pool is None
+
+    mock_pool, mock_conn, mock_cur = mock_async_pool # tuple unpacking baby
+    with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
+        """with patch.object(mock_pool, "connection", return_value=mock_conn), \
+                patch.object(mock_conn, "cursor", return_value=mock_cur):""" # just temporary note will remove later
+        # attempt to start postgres persister instance
+        await default_persister.start()
+        mock_pool.open.assert_awaited_once() # confirm that mock_pool.open() was called once at the start
+        assert default_persister._pool is not None
+
+        # attempt to stop above
+        await default_persister.stop()
+        mock_pool.close.assert_awaited_once() # and confirm that mock_pool.close() was called once in the end
+        assert default_persister._pool is None
+
+"""
+    CONTEXT MANAGER TEST
+    test PostgresPersister async context manager
+"""
+@pytest.mark.anyio
+async def test_postgres_persister_context_manager(mock_async_pool) -> None:
+    default_persister = PostgresPersister()
+    assert default_persister._pool is None
+
+    mock_pool, mock_conn, mock_cur = mock_async_pool
+    with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
+        async with default_persister as p:
+            assert p is default_persister # test that the same object is returned
+            mock_pool.open.assert_awaited_once() # when opening context manager will run open
+            assert p._pool is mock_pool # check if the pool did get initialized by context manager and see if patch above works
+        
+        mock_pool.close.assert_awaited_once() # and context manager closing shld run close automatically
+        assert default_persister._pool is None # and the pool should be cleaned up
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
 if __name__ == "__main__":
     pass
