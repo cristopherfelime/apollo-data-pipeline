@@ -1,6 +1,7 @@
 """
 		main entry point and orchestrator for apollo
 		v1.0 - completed end-to-end async orchestration, polymorphic scraper execution, OCP (partition_key, event_dict) tuple streaming to ApolloKafkaProducer achieving full SoC, and centralized logging configuration
+        v1.1 - hi
 """
 
 import logging
@@ -56,7 +57,7 @@ async def main() -> None:
 
         for scraper_output in results: # check if any scraper fails, continuation of asyncio.gather()'s return_exceptions=True explanation above
             if isinstance(scraper_output, Exception): # if that scraper failed, log it as a warning and skip processing it
-                logger.warning(f"(Apollo) main(), a scraper failed to scrape: {scraper_output}")
+                logger.warning(f"(Apollo) main orchestrator, a scraper failed to scrape: {scraper_output}")
                 continue
             # otherwise process the scraped data
             for event in scraper_output: # iterate over the scraped data from the current scraper
@@ -65,7 +66,7 @@ async def main() -> None:
                 elif isinstance(event, FinancialNewsPayload): # news goes to news_events
                     events["market-news-events"].append((event.source, event.model_dump())) # for future reference: {topic1: [(pk1, pk1event1), (pk1, pk1event2), (pk2, pk2event1), (pk2, pk2event2)], topic2: [ ... ]}
                 else: # unexpected type handling
-                    logger.warning(f"(Apollo) main() unexpectedly received '({type(event)})' from 'results' resulting in skipping the following: {event}")
+                    logger.warning(f"(Apollo) main orchestrator unexpectedly received '({type(event)})' from 'results' resulting in skipping the following: {event}")
 
         async with ApolloKafkaProducer() as producer:
             producer_results = await producer.run(events, return_results=True)
@@ -75,12 +76,14 @@ async def main() -> None:
         # print("Result of results: ") # test
         # print(results)
     except CancelledError:
-        logger.info("(Apollo) main() was running, then was stopped by the user (KeyboardInterrupt)")
+        logger.info("(Apollo) main orchestrator was running, then was stopped by the user (KeyboardInterrupt)")
         # no raise, this main() is the upper most method that catches the CancelledError
         return
     except Exception as e:
-        logger.error(f"(Apollo) main() unexpected error while running Apollo: {e}")
+        logger.error(f"(Apollo) main orchestrator unexpected error while running Apollo: {e}")
         return
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
 
@@ -92,7 +95,7 @@ if __name__ == "__main__":
 
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Apollo was stopped by the user (KeyboardInterrupt)")
+    except KeyboardInterrupt: # KeyboardInterrupt at the very top level (main orchestrator), child tasks use CancelledError for lower level interception
+        logger.info("Apollo (main orchestrator) was stopped by the user (KeyboardInterrupt)")
     except Exception as e:
-        logger.error(f"Apollo failed to run: {e}")
+        logger.error(f"Apollo (main orchestrator) failed to run: {e}")
