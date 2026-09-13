@@ -1,7 +1,7 @@
 """
 		main entry point and orchestrator for apollo
 		v1.0 - completed end-to-end async orchestration, polymorphic scraper execution, OCP (partition_key, event_dict) tuple streaming to ApolloKafkaProducer achieving full SoC, and centralized logging configuration
-        v1.1 - hi
+		v1.1 - standardized logging identifiers for main orchestrator and signal handling clarity
 """
 
 import logging

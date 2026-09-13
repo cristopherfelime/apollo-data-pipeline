@@ -496,8 +496,6 @@ async def test_postgres_persister_persist_events_unexpected_exception(mock_async
         await default_persister.stop()
         assert default_persister._pool is None
 
-# btw transactional failure handling and testing will be done on later integration tests so for now these are enough
-
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":

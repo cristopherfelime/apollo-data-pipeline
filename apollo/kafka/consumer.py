@@ -1,6 +1,7 @@
 """
     kafka consumer model
-    v1.0
+    v1.0 - completed ApolloKafkaConsumer with batch polling, manual commit, and lifecycle management
+    v1.1 - added graceful unclosed client disposal on failed startup and defensive None check in get_batch()
 """
 
 import os
@@ -79,7 +80,12 @@ class ApolloKafkaConsumer:
                 logger.info(f"(Apollo) Kafka Consumer started successfully with bootstrap servers: {self.bootstrap_servers}")
             except Exception as e:
                 logger.error(f"(Apollo) Error while starting Kafka Consumer: {e}")
-                self._consumer = None
+                if self._consumer is not None: # in case of KafkaConnectionError where AIOKafkaConsumer instance is made but no connection succeed, it will also be stopped gracefully this time """
+                    """
+                        2026-09-13 18:44:05,372 [ERROR] Unclosed AIOKafkaConsumer consumer: <aiokafka.consumer.consumer.AIOKafkaConsumer object at 0x74c71e557bf0>
+                    """
+                    await self._consumer.stop()
+                    self._consumer = None
         else:
             logger.info(f"(Apollo) Kafka Consumer already running!")
 
@@ -125,6 +131,12 @@ class ApolloKafkaConsumer:
         try:
             if self._consumer is None: # unlike kafka producer nature that accepts one-shot sends, consumers needs to be running to be able to consume as a group, we're also manually committing and kafka will not need to rebalance consumer groups
                 await self.start()
+                if self._consumer is None: # if it is still none, that means connection failed, so return an empty list instead
+                    return [] # found this from yoloing (dry running) consumer_daemon.py lmao
+                    """
+                    2026-09-13 18:44:05,371 [ERROR] (Apollo) Error while starting Kafka Consumer: KafkaConnectionError: Unable to bootstrap from [('nopeudontgettoseehost', noporteithersrryevenifitsfine, <AddressFamily.AF_UNSPEC: 0>)]
+                    2026-09-13 18:44:05,371 [ERROR] (Apollo) Error while getting batch from Kafka Consumer: 'NoneType' object has no attribute 'getmany'
+                    """
 
             return_batch: list[ConsumerRecord] = []
             batch = await self._consumer.getmany(max_records=max_records, timeout_ms=timeout_ms) # get many returns dict[TopicPartition, list[ConsumerRecord]]

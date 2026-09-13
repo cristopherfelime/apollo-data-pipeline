@@ -1,6 +1,7 @@
 """
     postgres service engine/model whatever u wanna call it
-    v1.0
+    v1.0 - completed PostgresPersister with atomic bulk inserts and event deserialization
+    v1.1 - integrated explicit conn.transaction() context manager for atomic batch commit and automatic rollback in psycopg 3
 """
 
 import os
