@@ -196,52 +196,53 @@ class PostgresPersister:
             if (self._pool is None) or (self._pool.closed):
                 await self.start() # ensure pool is running
             async with self._pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    # parametrized DML insertion statements stuff
-                    sql_reviews: str = """
-                        INSERT INTO staging_reviews(
-                            event_id, 
-                            app_id, 
-                            app_name, 
-                            user_name, 
-                            review_text, 
-                            rating, 
-                            app_version, 
-                            submitted_at, 
-                            ingested_at
-                        )
-                        VALUES
-                            (%(event_id)s, %(app_id)s, %(app_name)s, %(user_name)s, %(review_text)s, %(rating)s, %(app_version)s, %(submitted_at)s, %(ingested_at)s)
-                        ON CONFLICT (event_id)
-                        DO NOTHING;
-                    """ # one cool thing, these parametrized insert on the values u can pass in the key names to get their values when you passed in a mapping (dict) in executemany, if not (order based on the positional values) you get index based position in tuple instead. look down below
-                    sql_marketaux: str = """
-                        INSERT INTO staging_marketaux(
-                            event_id, 
-                            article_uuid, 
-                            title, 
-                            snippet, 
-                            url, 
-                            source, 
-                            sentiment_score, 
-                            published_at, 
-                            ingested_at
-                        )
-                        VALUES
-                            (%(event_id)s, %(article_uuid)s, %(title)s, %(snippet)s, %(url)s, %(source)s, %(sentiment_score)s, %(published_at)s, %(ingested_at)s)
-                        ON CONFLICT (event_id)
-                        DO NOTHING;
-                    """ # ON CONFLICT (event_id) DO NOTHING guarantees kafka's at-least-once delivery behavior, implementing idempotency so if a kafka commit fails, it may retry reinserting the same events, but since the on conflict statement it won't do anything (no creating duplicate entry nor throwing any error on the database side)
-                    for topic, events in parsed_events.items():
-                        if topic == "app-reviews-events": # atomic batching: postgres has this stuff where in an executemany if a single constraint or other error happens, that entire transaction will be aborted, if we put exception handling here and let the rest of the insertion to run (like for market-news-events), even though they're correct, they will not the committed to the database since they belong to the same aborted transaction, so it is better to not implement try-except at this level to prevent data loss
-                            await cur.executemany(sql_reviews, events) # so, if i pass in the list of dicts (events) directly here, it will automatically map the values based on the keys i passed in the insertion statement
-                            logger.info(f"(Apollo) Successfully persisted {len(events)} events from topic: {topic} into staging tables")
-                        elif topic == "market-news-events":
-                            await cur.executemany(sql_marketaux, events) # SSDD
-                            logger.info(f"(Apollo) Successfully persisted {len(events)} events from topic: {topic} into staging tables")
-                        else:
-                            logger.warning(f"(Apollo) Unrecognized topic '{topic}', skipping its database insertion")
-                    return True # ts success
+                async with conn.transaction(): # i forgor: this is the thing that actually handles transactions properly in psycopg 3, so on success it iwll commit automatically, and rollback on fail/exception. i think it was different back then or something
+                    async with conn.cursor() as cur:
+                        # parametrized DML insertion statements stuff
+                        sql_reviews: str = """
+                            INSERT INTO staging_reviews(
+                                event_id, 
+                                app_id, 
+                                app_name, 
+                                user_name, 
+                                review_text, 
+                                rating, 
+                                app_version, 
+                                submitted_at, 
+                                ingested_at
+                            )
+                            VALUES
+                                (%(event_id)s, %(app_id)s, %(app_name)s, %(user_name)s, %(review_text)s, %(rating)s, %(app_version)s, %(submitted_at)s, %(ingested_at)s)
+                            ON CONFLICT (event_id)
+                            DO NOTHING;
+                        """ # one cool thing, these parametrized insert on the values u can pass in the key names to get their values when you passed in a mapping (dict) in executemany, if not (order based on the positional values) you get index based position in tuple instead. look down below
+                        sql_marketaux: str = """
+                            INSERT INTO staging_marketaux(
+                                event_id, 
+                                article_uuid, 
+                                title, 
+                                snippet, 
+                                url, 
+                                source, 
+                                sentiment_score, 
+                                published_at, 
+                                ingested_at
+                            )
+                            VALUES
+                                (%(event_id)s, %(article_uuid)s, %(title)s, %(snippet)s, %(url)s, %(source)s, %(sentiment_score)s, %(published_at)s, %(ingested_at)s)
+                            ON CONFLICT (event_id)
+                            DO NOTHING;
+                        """ # ON CONFLICT (event_id) DO NOTHING guarantees kafka's at-least-once delivery behavior, implementing idempotency so if a kafka commit fails, it may retry reinserting the same events, but since the on conflict statement it won't do anything (no creating duplicate entry nor throwing any error on the database side)
+                        for topic, events in parsed_events.items():
+                            if topic == "app-reviews-events": # atomic batching: postgres has this stuff where in an executemany if a single constraint or other error happens, that entire transaction will be aborted, if we put exception handling here and let the rest of the insertion to run (like for market-news-events), even though they're correct, they will not the committed to the database since they belong to the same aborted transaction, so it is better to not implement try-except at this level to prevent data loss
+                                await cur.executemany(sql_reviews, events) # so, if i pass in the list of dicts (events) directly here, it will automatically map the values based on the keys i passed in the insertion statement
+                                logger.info(f"(Apollo) Successfully persisted {len(events)} events from topic: {topic} into staging tables")
+                            elif topic == "market-news-events":
+                                await cur.executemany(sql_marketaux, events) # SSDD
+                                logger.info(f"(Apollo) Successfully persisted {len(events)} events from topic: {topic} into staging tables")
+                            else:
+                                logger.warning(f"(Apollo) Unrecognized topic '{topic}', skipping its database insertion")
+                        return True # ts success
         except CancelledError:
             logger.info(f"(Apollo) Postgres persister persist_events() was running, then was stopped by the user (KeyboardInterrupt)")
             raise

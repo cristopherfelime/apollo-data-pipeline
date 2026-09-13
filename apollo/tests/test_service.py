@@ -1,6 +1,6 @@
 """
     unit testing script for PostgresPersister in service.py
-    v0.1
+    v1.0
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -242,22 +242,28 @@ def mock_async_pool():
     '''synthetic mock AsyncConnectionPool with nested connection and cursor async context managers, as well as monkeypatch.setenv() to mock os.getenv()'''
     mock_pool = MagicMock(spec=AsyncConnectionPool) # yea so AsyncConnectionPool itself is not asynchronous and so does its connection() method (we don't await when using them) so we use MagicMock, but that connection() method does return an object that uses async context manager protocol (aenter and aexit)
     mock_pool.closed = False
-    mock_pool.open = AsyncMock() # unlike above, all below (except connection) must be awaited so use AsyncMock
+    mock_pool.open = AsyncMock() # unlike above, all below (except connection and transaction) must be awaited so use AsyncMock
     mock_pool.close = AsyncMock()
 
     mock_conn = MagicMock() # switched to MagicMock to stop "RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited" because the connection object itself is synchronous like above
+    mock_tx = MagicMock() # for verification transaction commit success or fail (rollbacK), maybe will be tested again during integration test
     mock_cur = AsyncMock()
     mock_cur.executemany = AsyncMock()
 
-    # setup cursor async context manager
+    # setup cursor async context manager (async with conn.cursor() as cur)
     mock_conn.cursor.return_value.__aenter__ = AsyncMock(return_value=mock_cur)
     mock_conn.cursor.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    # setup transaction object context manager (async with conn.transcation() in service.py, we don't use "as (name)" so it doesn't return anything like the others, so just immediately change its aenter and aexit)
+    mock_conn.transaction.return_value = mock_tx
+    mock_tx.__aenter__ = AsyncMock(return_value=mock_tx)
+    mock_tx.__aexit__ = AsyncMock(return_value=None)
 
     # setup connection async context manager (continuation from above, here is what i meant by it returning an object that uses async context manager protocol)
     mock_pool.connection.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_pool.connection.return_value.__aexit__ = AsyncMock(return_value=None)
 
-    return mock_pool, mock_conn, mock_cur
+    return mock_pool, mock_conn, mock_tx, mock_cur
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -292,7 +298,7 @@ async def test_postgres_persister_start_and_stop(mock_async_pool) -> None:
     default_persister = PostgresPersister()
     assert default_persister._pool is None
 
-    mock_pool, mock_conn, mock_cur = mock_async_pool # tuple unpacking baby
+    mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool # tuple unpacking baby
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
         # attempt to start postgres persister instance
         await default_persister.start()
@@ -313,7 +319,7 @@ async def test_postgres_persister_context_manager(mock_async_pool) -> None:
     default_persister = PostgresPersister()
     assert default_persister._pool is None
 
-    mock_pool, mock_conn, mock_cur = mock_async_pool
+    mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
         async with default_persister as p:
             assert p is default_persister # test that the same object is returned
@@ -389,7 +395,7 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
     default_persister = PostgresPersister()
     assert default_persister._pool is None
 
-    mock_pool, mock_conn, mock_cur = mock_async_pool
+    mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
 
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
         await default_persister.start()
@@ -398,6 +404,11 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
 
         success = await default_persister.persist_events(sample_parsed_events) # run it
         assert success is True # on successful insert should return True
+
+        # checks the core persistence process stuff
+        mock_conn.transaction.assert_called_once()
+        mock_tx.__aenter__.assert_awaited_once()
+        mock_tx.__aexit__.assert_awaited_once_with(None, None, None) # NOTE: context manager exits that were passed without arguments (those exc_type, exc_val, exc_tb stuff) means that the exit was clean with no exception, we use this to check for successful transaction
 
         calls = mock_cur.executemany.await_args_list # from executemany we will get the list of all calls (awaits in this async case) and their specific arguments
         assert len(calls) == 2 # there should be 2 calls, one for reviews and one for news
@@ -429,7 +440,7 @@ async def test_postgres_persister_persist_events_unknown_topic(mock_async_pool, 
     default_persister = PostgresPersister()
     assert default_persister._pool is None
 
-    mock_pool, mock_conn, mock_cur = mock_async_pool
+    mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
 
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
         await default_persister.start()
@@ -439,6 +450,9 @@ async def test_postgres_persister_persist_events_unknown_topic(mock_async_pool, 
         success = await default_persister.persist_events(sample_unknown_topic_parsed_events) # run it
         assert success is True # in the actual method, unknown topics are skipped and only logs a warning, still counts as successful
 
+        mock_conn.transaction.assert_called_once()
+        mock_tx.__aenter__.assert_awaited_once()
+        mock_tx.__aexit__.assert_awaited_once_with(None, None, None) # 
         mock_cur.executemany.assert_not_called() # executemany() shouldnt be called at all here
         assert "(Apollo) Unrecognized topic 'unknown-unsupported-topic', skipping its database insertion" in caplog.text
 
@@ -455,7 +469,7 @@ async def test_postgres_persister_persist_events_unexpected_exception(mock_async
     default_persister = PostgresPersister()
     assert default_persister._pool is None
 
-    mock_pool, mock_conn, mock_cur = mock_async_pool
+    mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
 
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
         await default_persister.start()
@@ -469,6 +483,14 @@ async def test_postgres_persister_persist_events_unexpected_exception(mock_async
         success = await default_persister.persist_events(sample_parsed_events)
         assert success is False # on failed insert should return False
 
+        mock_conn.transaction.assert_called_once()
+        mock_tx.__aenter__.assert_awaited_once()
+        # ----- witchcraft
+        exc_type, exc_val, exc_tb = mock_tx.__aexit__.await_args.args # unpacking the arguments received by aexit
+        assert exc_type is Exception # confirm that it is an exception type
+        assert "executemany error stuff" in str(exc_val) # confirm the exception value is correct after conversion to string
+        assert exc_tb is not None # trackeback whatever (confirm it exists)
+        # -----
         assert "(Apollo) Error while Postgres persister was pushing to database: executemany error stuff" in caplog.text
 
         await default_persister.stop()
