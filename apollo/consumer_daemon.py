@@ -2,6 +2,7 @@
     kafka consumer daemon process for apollo (orchestrator for consumer)
     v1.0 - completed consumer orchestrator integrating ApolloKafkaConsumer with PostgresPersister, cooperative graceful shutdown (SIGINT/SIGTERM), rate-limiting backoff, and at-least-once offset commitment
     v1.1 - added unparseable batch or offset acknowledgement guard to avoid infinite looping and broker downtime backoff
+    v1.1.1 - removed unused Callable object import from typing package lol
 """
 
 import logging
@@ -10,7 +11,7 @@ import os
 import signal # for handling SIGTERM (docker stop), SIGINT (ctrl + C) or other stuff
 import sys # to check the os running ts
 from asyncio import CancelledError
-from typing import Any, Callable
+from typing import Any
 from aiokafka.structs import ConsumerRecord
 
 from apollo.kafka.consumer import ApolloKafkaConsumer
