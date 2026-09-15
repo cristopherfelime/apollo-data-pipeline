@@ -1,6 +1,7 @@
 """
         pydantic base model schemas for google play reviews and marketaux rest api
         v1.2.1 - changed ConfigDict() model config for both BaseModel parameter from 'extras' to 'extra' ☠️☠️ (thx pytest)
+        v1.3 - added boiler code for transaction logs, check TransactionPayload below (ongoing)
 """
 
 from uuid import UUID, uuid4 # uuid4 is used for auto-generating unique identifiers
@@ -132,3 +133,16 @@ class FinancialNewsPayload(BaseModel):
             cleaned_text = " ".join(stripped_text.split())
             return cleaned_text
         return news_text
+
+# -------------------------------------------------------------------------------------------------------
+
+"""
+    class docstring placeholder text thing
+"""
+# Faker fake transaction payload validation model, look i dont have any expandable transaction log api source
+class TransactionPayload(BaseModel):
+    model_config = ConfigDict(
+#       populate_by_name=True, (not needed, we're generating our own data for this one, not pulling from an API)
+        extra="forbid",
+        frozen=True
+    )
