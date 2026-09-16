@@ -1,20 +1,23 @@
 """
-        pydantic base model schemas for google play reviews and marketaux rest api
+        pydantic base model schemas for google play reviews, marketaux rest api, and synthetic transaction logs
         v1.2.1 - changed ConfigDict() model config for both BaseModel parameter from 'extras' to 'extra' ☠️☠️ (thx pytest)
-        v1.3 - added boiler code for transaction logs, check TransactionPayload below (ongoing)
+        v1.3 - added TransactionPayload model with UTC timestamp standardization, MCC pattern checking, and Decimal amount validation for synthetic transaction logs
 """
 
+import re # re is used for regular expressions, which is used for cleaning review text down below (re.sub())
 from uuid import UUID, uuid4 # uuid4 is used for auto-generating unique identifiers
 from datetime import datetime, timezone # datetime is used for handling date and time, timezone is used for handling timezones
-import re # re is used for regular expressions, which is used for cleaning review text down below (re.sub())
 from pydantic import BaseModel, Field, ConfigDict, field_validator # pydantic base model and field for defining data models and validations, configdict for configuring the model, field_validator for validating fields
-from typing import Annotated # annotated is used for adding metadata to types, in this case for adding constraints to the types (min_length, max_length, ge, le, etc)
+from typing import Annotated, Literal # annotated is used for adding metadata to types, in this case for adding constraints to the types (min_length, max_length, ge, le, etc), literal is basically for string enums
+from decimal import Decimal # way more preferred than standard computer float when storing financial data
 
 # some regex caching for maximum speed (no evaluation every re.sub)
 # took the regex pattern straight up from Genesis' pipeline.py lol (which i took previously from internet)
 # removes html tags like <br />, </br />, <a> </a>, etc
 # also removes html entities like &lt;, &gt;, &amp;, etc
 HTML_REGEX_CLEANER = re.compile(r"<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});")
+# ISO 8601 / RFC 3339 in UTC with at least millisecond precision, keep in mind to use this format in Faker later if possible
+TX_TIMESTAMP_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 
 # -------------------------------------------------------------------------------------------------------
 
@@ -31,8 +34,8 @@ HTML_REGEX_CLEANER = re.compile(r"<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6})
         submitted_at (datetime): timestamp of when review was posted in UTC (alias: at)
         ingested_at (datetime): UTC timestamp of when review was ingested into pipeline
     methods:
-        clean_review_text -> cleans html tags and whitespace from review text before validation
-        convert_datetime_submitted_at -> standardizes submitted_at datetime to UTC timezone
+        clean_review_text -> field validator that cleans html tags and whitespace from review text before validation
+        convert_datetime_submitted_at -> field validator that standardizes submitted_at datetime to UTC timezone
 """
 # google play reviews validation model, target topic on kafka: app-reviews-events
 class ReviewPayload(BaseModel): # a class inherits Pydantic's BaseModel to automatically get type checking, data validation, and other useful methods will be used downstream
@@ -99,7 +102,7 @@ class ReviewPayload(BaseModel): # a class inherits Pydantic's BaseModel to autom
         published_at (datetime): original article published timestamp in UTC
         ingested_at (datetime): UTC timestamp of when article was ingested into pipeline
     methods:
-        clean_news_text -> cleans html tags and whitespace from article title and snippet before validation
+        clean_news_text -> field validator that cleans html tags and whitespace from article title and snippet before validation
 """
 # marketaux api validation model, target topic on kafka: market-news-events
 class FinancialNewsPayload(BaseModel):
@@ -137,7 +140,20 @@ class FinancialNewsPayload(BaseModel):
 # -------------------------------------------------------------------------------------------------------
 
 """
-    class docstring placeholder text thing
+    pydantic validation model for synthetic financial transaction logs (target topic: transaction-events)
+    attributes:
+        tx_id (UUID): unique identifier for the transaction event (auto-generated)
+        tx_timestamp (datetime): timestamp of when transaction was conducted in UTC
+        tx_method (str): payment method used (DUITNOW_QR, CREDIT_CARD, DEBIT_CARD, FPX, E_WALLET)
+        amount_myr (Decimal): monetary transaction amount in MYR (minimum RM 0.01)
+        user_id (UUID): unique identifier of the user who conducted the transaction
+        merchant_name (str): name of the merchant or business entity
+        merchant_mcc (str): 4-digit ISO 18245 merchant category code
+        payment_status (str): transaction payment status as of logging (SUCCESS, FAILED, PENDING, REVERSED)
+        ingested_at (datetime): UTC timestamp of when transaction was ingested into pipeline
+        is_flagged_fraud (bool): preliminary boolean flag indicating if the transaction is flagged as fraud, important for Artemis
+    methods:
+        verify_and_convert_timestamp -> field validator that standardizes tx_timestamp to UTC or validates ISO 8601 UTC string format
 """
 # Faker fake transaction payload validation model, look i dont have any expandable transaction log api source
 class TransactionPayload(BaseModel):
@@ -146,3 +162,32 @@ class TransactionPayload(BaseModel):
         extra="forbid",
         frozen=True
     )
+
+    tx_id: Annotated[UUID, Field(default_factory=uuid4)]
+    tx_timestamp: Annotated[datetime, Field(description="exact UTC timestamp of when transaction was conducted")] # yyeeee
+    tx_method: Annotated[Literal["DUITNOW_QR", "CREDIT_CARD", "DEBIT_CARD", "FPX", "E_WALLET"], Field(max_length=100, description="transaction method used")]
+    amount_myr: Annotated[Decimal, Field(ge=Decimal("0.01"), decimal_places=2)] # transaction amount in rm
+    user_id: Annotated[UUID, Field(description="user ID of the user who conducted the transaction type shi")]
+    merchant_name: Annotated[str, Field(min_length=1, max_length=500, description="name of the merchant or business")]
+    merchant_mcc: Annotated[str, Field(max_length=4, pattern=r"^\d{4}$", description="merchant category code")] # merchant category code has 4 digits 
+    payment_status: Annotated[Literal["SUCCESS", "FAILED", "PENDING", "REVERSED"], Field(max_length=100)] # transaction payment status as of logging
+    ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))]
+    is_flagged_fraud: Annotated[bool, Field(description="boolean flag indicating if the transaction is flagged as fraud (ts primarily for artemis later)")]
+
+    """
+        field validator for tx_timestamp, verifying ISO 8601 UTC string format or standardizing datetime to UTC
+        arguments: cls (class itself), tx_timestamp (str | datetime)
+        returns: standardized UTC datetime object
+    """
+    @field_validator("tx_timestamp", mode="before")
+    @classmethod
+    def verify_and_convert_timestamp(cls, tx_timestamp: str | datetime) -> datetime:
+        if isinstance(tx_timestamp, str): # if given string
+            if not TX_TIMESTAMP_REGEX.match(tx_timestamp): # check if matches expected pattern
+                raise ValueError("tx_timestamp must follow ISO 8601 / RFC 3339 in UTC with at least millisecond precision (YYYY-MM-DDTHH:MM:SS.sssZ)")
+            return datetime.fromisoformat(tx_timestamp) # return converted string to datetime if it received string instead
+        if isinstance(tx_timestamp, datetime): # in case if its a datetime already
+            if tx_timestamp.tzinfo is None: # but no time zone info at all
+                return tx_timestamp.replace(tzinfo=timezone.utc) # replace with utc timezone
+            return tx_timestamp.astimezone(timezone.utc) # convert to utc timezone if timezone info is already present
+        raise ValueError("tx_timestamp must be a string formatted in datetime or a straight up datetime object")
