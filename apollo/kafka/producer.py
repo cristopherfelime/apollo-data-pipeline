@@ -2,6 +2,7 @@
 		kafka producer model
 		v1.2.1 - added import asyncio to fix missing import in run()...
         v1.2.1.1 - start() now checks if _producer is an instance of AIOKafkaProducer or not
+        v1.3 - kafka partition key can be None apparently, and i found out that there's no such thing as DLQ at partition level (in fact, it can even create a 'hot-spotting' in a specific key due to how its hashing partitioner works), so i moved them to topic level by making a new DLQ topic for each
 """
 
 import logging
@@ -113,28 +114,29 @@ class ApolloKafkaProducer:
     """
         prepares and batches events grouped by topic and partition key into serialized byte arrays using orjson
         arguments: self, events (dict mapping topic names to lists of (partition_key, event_dict) tuples)
-        EXPECTED TO return: nested dict of topic -> {partition_key_bytes: list[event_bytes]} (or empty dict on failure)
+        EXPECTED TO return: nested dict of topic -> {partition_key_bytes_or_none: list[event_bytes]} (or empty dict on failure)
     """
-    def _prepare_payload(self, events: dict[str, list[tuple[str | None, dict]]]) -> dict[str, dict[bytes, list[bytes]]] | None: # protected only intended to be used in send_events() in the future as well
+    def _prepare_payload(self, events: dict[str, list[tuple[str | None, dict]]]) -> dict[str, dict[bytes | None, list[bytes]]] | None: # protected only intended to be used in send_events() in the future as well
         try:
             if (not isinstance(events, dict)):
                 raise ValueError(f"(Apollo) expected events to be a dict, but got {type(events).__name__}")
-            payload: dict[str, dict[bytes, list[bytes]]] = {} # {topic1: {partition_key1: [event1_in_bytes, event2_in_bytes], partition_key2: [event1_in_bytes, ...], ...}, topic2: {...}, ...}
+            payload: dict[str, dict[bytes | None, list[bytes]]] = {} # {topic1: {partition_key1: [event1_in_bytes, event2_in_bytes], None: [unkeyed_events, ...]}, ...}
             for topic, events_list in events.items():
                 try:
-                    per_topic: dict[bytes, list[bytes]] = {} # {partition_key1: [event1_in_bytes, event2_in_bytes], partition_key2: [event1_in_bytes, ...], ...} per specific topic 
+                    per_topic: dict[bytes | None, list[bytes]] = {} # {partition_key1: [event1_in_bytes, event2_in_bytes], ...} per specific topic 
                     for key, event in events_list: # unpacking the partition key and event from the tuple we appened in main.py
                         try:
-                            if (key is None) or (not isinstance(key, str)) or (key.strip() == ""): # NGAHHHHH
-                                key = "DLQ" # dead letter queue, place for events with a malformed partition key (the PIT)
-                            key = key.lower().strip().encode("utf-8") # cleaning the key then encode it to bytes
+                            key_bytes: bytes | None = key.lower().strip().encode("utf-8") if isinstance(key, str) and key.strip() else None # clean and encode key to bytes if string, else None for round-robin partitioning
                             byte_event: bytes = orjson.dumps(event) # orjson dumps the dict to byte directly unlike json which dumps to (how convenient)
-                            per_topic.setdefault(key, []).append(byte_event) # setdefault() will return the value for key if key is in the dictionary, if not, it will insert key with a value of default (in this case it is []) and return that
+                            per_topic.setdefault(key_bytes, []).append(byte_event) # setdefault() will return the value for key if key is in the dictionary, if not, it will insert key with a value of default (in this case it is []) and return that
                         except CancelledError:
                             logger.info("(Apollo) Kafka Producer _prepare_payload() was running, then was stopped by the user (KeyboardInterrupt)")
                             raise
-                        except Exception as e:
-                            logger.error(f"(Apollo) Error while preparing an event for payload for Kafka, resulting in skipping the event: {e}")
+                        except (TypeError, Exception) as e:
+                            logger.error(f"(Apollo) Error while preparing an event for payload for Kafka, potentially a malformed event, routing to DLQ: {e}")
+                            dlq_topic = f"{topic}-dlq"
+                            dlq_payload = orjson.dumps({"error": str(e), "raw_event": str(event)})
+                            payload.setdefault(dlq_topic, {}).setdefault(b"error", []).append(dlq_payload)
                             continue # continue to next event
                     payload.update({topic: per_topic}) # add the processed topic to the payload
                 except CancelledError:
@@ -191,7 +193,7 @@ class ApolloKafkaProducer:
                 if opened_locally:
                     await self.start()
 
-                payload: dict[str, dict[bytes, list[bytes]]] | None = self._prepare_payload(events) # prepare the kafka payload
+                payload: dict[str, dict[bytes | None, list[bytes]]] | None = self._prepare_payload(events) # prepare the kafka payload
                 
                 if not payload:
                     logger.warning("(Apollo) Payload is empty, nothing to stream to Kafka")

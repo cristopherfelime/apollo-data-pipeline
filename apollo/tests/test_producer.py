@@ -1,6 +1,7 @@
 """
     unit testing script for ApolloKafkaProducer in producer.py
     v1.1 - added start method calling assertion for mock producer in lifecycle and context manager tests
+    v1.2 - updated ts to follow producer.py accordingly regarding dlq topic changes (primarily in _prepare_payload() testing of none fallback and dlq topic routing)
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -77,13 +78,13 @@ def sample_events_dict(sample_review_event, sample_news_event): # {topic1: [(pk1
 
 @pytest.fixture
 def sample_edge_case_events_dict(sample_review_event):
-    """synthetic events dictionary testing partition key sanitation and DLQ fallback edge cases"""
+    """synthetic events dictionary testing partition key sanitation and None fallback edge cases"""
     return {
         "app-reviews-events": [
-            (None, sample_review_event), # None partition key -> fallback to b"dlq"
-            ("", sample_review_event), # empty string -> fallback to b"dlq"
-            ("   ", sample_review_event), # whitespace-only string -> fallback to b"dlq"
-            (12345, sample_review_event), # non-string type -> fallback to b"dlq"
+            (None, sample_review_event), # None partition key -> fallback to None
+            ("", sample_review_event), # empty string -> fallback to None
+            ("   ", sample_review_event), # whitespace-only string -> fallback to None
+            (12345, sample_review_event), # non-string type -> fallback to None
             ("  MY.COM.GXBANK.APP  ", sample_review_event) # uppercase with spaces -> b"my.com.gxbank.app"
         ]
     }
@@ -223,9 +224,9 @@ def test_kafka_producer_prepare_payload_valid(sample_events_dict) -> None:
     assert deserialized_news["sentiment_score"] == 0.456
 
 """
-    PROCESSING TEST (PARTITION KEY & DLQ FALLBACK)
+    PROCESSING TEST (PARTITION KEY SANITATION & NONE FALLBACK)
     tests ApolloKafkaProducer._prepare_payload() with edge cases in partition keys
-    verifies that None, empty string, whitespace string, and non-string keys fallback to b"dlq", while valid keys are lowercased and stripped
+    verifies that None, empty string, whitespace string, and non-string keys fallback to None (for round-robin partitioning), while valid keys are lowercased and stripped
 """
 def test_kafka_producer_prepare_payload_dlq_fallback(sample_edge_case_events_dict) -> None:
     default_producer = ApolloKafkaProducer()
@@ -234,18 +235,18 @@ def test_kafka_producer_prepare_payload_dlq_fallback(sample_edge_case_events_dic
     assert isinstance(payload, dict) # verifies payload is a dictionary
     review_topic_payload = payload["app-reviews-events"] # subset to app reviews topic to check partition keys
 
-    # DLQ partition should have collected 4 edge cases (None, "", "   ", 12345)
-    assert b"dlq" in review_topic_payload # verifies dlq partition key
-    assert len(review_topic_payload[b"dlq"]) == 4 # verifies 4 edge cases (None, "", "   ", 12345)
+    # Unkeyed partition key should have collected 4 edge cases (None, "", "   ", 12345) under None key
+    assert None in review_topic_payload # verifies None partition key
+    assert len(review_topic_payload[None]) == 4 # verifies 4 edge cases (None, "", "   ", 12345)
 
     # Valid key with leading/trailing spaces and uppercase should be normalized
     assert b"my.com.gxbank.app" in review_topic_payload # verifies valid key with leading/trailing spaces and uppercase is normalized
     assert len(review_topic_payload[b"my.com.gxbank.app"]) == 1 # verifies 1 valid event
 
 """
-    PROCESSING TEST (MALFORMED EVENT RESILIENCE)
-    tests ApolloKafkaProducer._prepare_payload() skipping un-serializable events
-    verifies individual malformed events are skipped while valid events in the same topic are preserved
+    PROCESSING TEST (MALFORMED EVENT DLQ ROUTING)
+    tests ApolloKafkaProducer._prepare_payload() routing un-serializable events to topic DLQ
+    verifies individual malformed events are routed to {topic}-dlq while valid events in the same topic are preserved
 """
 def test_kafka_producer_prepare_payload_malformed_event_skipped(sample_malformed_events_dict) -> None:
     default_producer = ApolloKafkaProducer()
@@ -253,8 +254,11 @@ def test_kafka_producer_prepare_payload_malformed_event_skipped(sample_malformed
 
     assert isinstance(payload, dict)
     review_topic_payload = payload["app-reviews-events"]
-    # only the valid serializable event is kept, set object event skipped
+    # only the valid serializable event is kept in the main topic
     assert len(review_topic_payload[b"my.com.gxbank.app"]) == 1
+    # malformed unserializable event is routed to DLQ topic
+    assert "app-reviews-events-dlq" in payload
+    assert len(payload["app-reviews-events-dlq"][b"error"]) == 1
 
 """
     PROCESSING TEST (INVALID INPUT TYPE)
