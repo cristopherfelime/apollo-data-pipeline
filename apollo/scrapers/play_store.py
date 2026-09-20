@@ -6,10 +6,10 @@
 
 import logging # logging purposes
 import asyncio # python's asynchronous programming library
+import itertools # for flattening the list of lists
 from asyncio import CancelledError # to catch cancelled error (like KeyboardInterrupt)
 from google_play_scraper import reviews # google play scraper library we'll be using
 from pydantic import ValidationError # for catching validation errors
-import itertools # for flattening the list of lists
 
 from apollo.schemas import ReviewPayload # to validate the data
 from apollo.scrapers.base import BaseScraper # to inherit the abstract class
@@ -42,7 +42,7 @@ class PlayStoreScraper(BaseScraper):
         arguments: self, app_dict (dict): dictionary to store app ids and app names
         EXPECTED TO return: None
     """
-    def __init__(self, app_dict: dict=None):
+    def __init__(self, app_dict: dict=None) -> None:
         if app_dict is not None:
             self.app_dict = app_dict
         else: # default instance app_dict
@@ -193,11 +193,13 @@ class PlayStoreScraper(BaseScraper):
 """
     main function to run the scraper from terminal, js test purposes only
 """
-async def main():
+async def main() -> None:
     scraper = PlayStoreScraper()
     results = await scraper.run(10)
     print(results)
     print(f"succesfully scrapped {len(results)} reviews")
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__": # if u want to test on running it directly on terminal
     try:

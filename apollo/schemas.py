@@ -187,3 +187,8 @@ class TransactionPayload(BaseModel):
                 return timestamp.replace(tzinfo=timezone.utc) # replace with utc timezone
             return timestamp.astimezone(timezone.utc) # convert to utc timezone if timezone info is already present
         raise ValueError("timestamp must be a string formatted in datetime or a straight up datetime object")
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    pass

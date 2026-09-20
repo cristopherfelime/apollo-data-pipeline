@@ -5,11 +5,11 @@
 
 import logging # logging purposes
 import asyncio # python's asynchronous programming library
-from asyncio import CancelledError # to catch cancelled error (like KeyboardInterrupt)
 import os # os file navigation purposes
-from dotenv import load_dotenv # for loading environment variables from .env file
 import httpx # python's improved http requests library, used to make request to the rest api
 import itertools # for flattening nested list results from concurrent async requests
+from asyncio import CancelledError # to catch cancelled error (like KeyboardInterrupt)
+from dotenv import load_dotenv # for loading environment variables from .env file
 from pydantic import ValidationError # to handle validation error from pydantic models
 
 from apollo.schemas import FinancialNewsPayload # to validate data
@@ -52,7 +52,7 @@ class MarketauxScraper(BaseScraper):
 	search_targets: list[str]
 	client: httpx.AsyncClient
 
-	def __init__(self, params: dict[str, str] | None=None, search_targets: list[str] | None=None):
+	def __init__(self, params: dict[str, str] | None=None, search_targets: list[str] | None=None) -> None:
 		self.client = None
 		if params:
 			self.params = params
@@ -308,7 +308,7 @@ class MarketauxScraper(BaseScraper):
 """
 	the main function to run the scraper from terminal, js test purposes only
 """
-async def main():
+async def main() -> None:
 	params = { # parameters for the api call
 		"api_token": os.getenv("MARKETAUX_TOKEN"),
 		"limit": 3, # we using free plan so article limit per call is 3 maximum,
@@ -320,6 +320,8 @@ async def main():
 		results = await scraper.run(count=1)
 	print(results)
 	print(f"succesfully scrapped {len(results)} news")
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
 	try:

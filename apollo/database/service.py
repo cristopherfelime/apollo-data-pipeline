@@ -251,6 +251,7 @@ class PostgresPersister:
             logger.error(f"(Apollo) Error while Postgres persister was pushing to database: {e}")
             return False
 
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     pass

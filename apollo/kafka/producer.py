@@ -274,6 +274,7 @@ class ApolloKafkaProducer:
             await self.stop()
             return {} # empty dict since unexpected error
 
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     pass

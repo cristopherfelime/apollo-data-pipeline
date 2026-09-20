@@ -176,6 +176,7 @@ class ApolloKafkaConsumer:
             logger.error(f"(Apollo) Error while committing offset from Kafka Consumer: {e}")
             return
 
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     pass

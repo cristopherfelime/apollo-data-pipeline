@@ -37,3 +37,8 @@ class BaseScraper(ABC):
     @abstractmethod
     async def run(self, count: int) -> list[BaseModel]:
         pass
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    pass
