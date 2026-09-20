@@ -3,12 +3,13 @@
         v1.2.1 - changed ConfigDict() model config for both BaseModel parameter from 'extras' to 'extra' ☠️☠️ (thx pytest)
         v1.3 - added TransactionPayload model with UTC timestamp standardization, MCC pattern checking, and Decimal amount validation for synthetic transaction logs
         v1.3.1 - fixed wrong kafka topic label in TransactionPayload docstring, modified some field names in TransactionPayload, and found out about pydantic's automatic ISO 8601 string conversion so cool
+        v1.3.2 - used PlainSerializer to change model_dump(mode="json") behavior from parsing Decimal to string to immediately cast it to float, check amount_myr again
 """
 
 import re # re is used for regular expressions, which is used for cleaning review text down below (re.sub())
 from uuid import UUID, uuid4 # uuid4 is used for auto-generating unique identifiers
 from datetime import datetime, timezone # datetime is used for handling date and time, timezone is used for handling timezones
-from pydantic import BaseModel, Field, ConfigDict, field_validator # pydantic base model and field for defining data models and validations, configdict for configuring the model, field_validator for validating fields
+from pydantic import BaseModel, Field, ConfigDict, field_validator, PlainSerializer # pydantic base model and field for defining data models and validations, configdict for configuring the model, field_validator for validating fields. PlainSerializer overrides .model_dump() behavior basically, for example: model_dump(mode="json") behavior is changed by using PlainSerializer(when_used="json") instead of PlainSerializer() alone which changes .model_dump(mode="before") behavior
 from typing import Annotated, Literal # annotated is used for adding metadata to types, in this case for adding constraints to the types (min_length, max_length, ge, le, etc), literal is basically for string enums
 from decimal import Decimal # way more preferred than standard computer float when storing financial data
 
@@ -165,7 +166,7 @@ class TransactionPayload(BaseModel):
     transaction_id: Annotated[UUID, Field(default_factory=uuid4)]
     timestamp: Annotated[datetime, Field(description="exact UTC timestamp of when transaction was conducted")] # yyeeee
     transaction_method: Annotated[Literal["DUITNOW_QR", "CREDIT_CARD", "DEBIT_CARD", "FPX", "E_WALLET"], Field(max_length=100, description="transaction method used")]
-    amount_myr: Annotated[Decimal, Field(ge=Decimal("0.01"), decimal_places=2)] # transaction amount in rm
+    amount_myr: Annotated[Decimal, Field(gt=Decimal("0.00"), decimal_places=2), PlainSerializer(lambda x: float(x), when_used="json")] # transaction amount in rm, plainserializer to ensure that when dumped using mode="json" it would be float and not str, to also avoid JSONEncodeError by orjson downstream
     user_id: Annotated[UUID, Field(description="user ID of the user who conducted the transaction type shi")]
     merchant_name: Annotated[str, Field(min_length=1, max_length=500, description="name of the merchant or business")]
     merchant_mcc: Annotated[str, Field(max_length=4, pattern=r"^\d{4}$", description="merchant category code")] # merchant category code has 4 digits 

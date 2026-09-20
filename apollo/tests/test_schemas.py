@@ -1,15 +1,18 @@
 """
     unit testing script for apollo schemas.py
     v1.0 - comprehensive validation, html cleaning, timezone standardization, immutability, and boundary tests for ReviewPayload and FinancialNewsPayload
+    v1.1 - added comprehensive test suite for TransactionPayload covering Decimal serialization, ISO timestamp parsing, MCC code validation, and immutability
+    v1.1.1 - turned mechant_mcc regex pattern validation unit test block docstring to raw string to avoid dumbahh terminal warning
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
 import pytest
-from datetime import datetime, timezone
-from uuid import UUID
+from datetime import datetime, timezone, timedelta
+from uuid import UUID, uuid4
+from decimal import Decimal
 from pydantic import ValidationError
 
-from apollo.schemas import ReviewPayload, FinancialNewsPayload
+from apollo.schemas import ReviewPayload, FinancialNewsPayload, TransactionPayload
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -278,6 +281,265 @@ def test_financial_news_frozen_immutability() -> None:
     )
     with pytest.raises(ValidationError):
         payload.title = "Modified Title" # invalid, model is frozen
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# TransactionPayload test cases
+
+""" 
+    VALIDATION TEST
+    tests TransactionPayload initialization with valid synthetic transaction data
+    primarily tests default uuid generation, string ISO 8601 parsing, and auto-generation of transaction_id and ingested_at timestamps
+"""
+def test_transaction_payload_valid_from_dict() -> None:
+    test_user_id = uuid4()
+    raw_data = { # synthetic transaction data
+        "timestamp": "2026-09-20T14:30:00Z",
+        "transaction_method": "DUITNOW_QR",
+        "amount_myr": Decimal("25.50"),
+        "user_id": test_user_id,
+        "merchant_name": "Village Park Restaurant",
+        "merchant_mcc": "5812",
+        "payment_status": "SUCCESS",
+        "is_flagged_fraud": False
+    }
+    payload = TransactionPayload(**raw_data) # initialize TransactionPayload model with unpacked raw_data
+    assert isinstance(payload.transaction_id, UUID) # testing auto-generation of transaction_id UUID
+    assert payload.timestamp.tzinfo == timezone.utc # testing automatic ISO string conversion to UTC datetime
+    assert payload.transaction_method == "DUITNOW_QR"
+    assert payload.amount_myr == Decimal("25.50")
+    assert payload.user_id == test_user_id
+    assert payload.merchant_name == "Village Park Restaurant"
+    assert payload.merchant_mcc == "5812"
+    assert payload.payment_status == "SUCCESS"
+    assert payload.is_flagged_fraud is False
+    assert payload.ingested_at.tzinfo == timezone.utc # testing auto-generation of ingested_at timestamp
+
+""" 
+    SERIALIZATION TEST
+    tests TransactionPayload PlainSerializer behavior on amount_myr during model_dump(mode='json')
+    primarily tests that Decimal amounts are serialized to float instead of string for orjson compatibility downstream
+"""
+def test_transaction_payload_plain_serializer_json_dump() -> None:
+    payload = TransactionPayload(
+        timestamp=datetime.now(timezone.utc),
+        transaction_method="FPX",
+        amount_myr=Decimal("1250.75"),
+        user_id=uuid4(),
+        merchant_name="Shopee Malaysia",
+        merchant_mcc="5311",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    )
+    dumped_json = payload.model_dump(mode="json")
+    assert isinstance(dumped_json["amount_myr"], float) # PlainSerializer should serialize Decimal to float in JSON mode
+    assert dumped_json["amount_myr"] == 1250.75
+
+    # standard python mode should still retain Decimal
+    dumped_python = payload.model_dump(mode="python")
+    assert isinstance(dumped_python["amount_myr"], Decimal)
+
+""" 
+    VALIDATION TEST
+    tests TransactionPayload timestamp conversion across various formats (naive datetime, timezone-aware datetime, and ISO strings)
+    primarily tests field validator verify_and_convert_timestamp ensuring UTC standardization
+"""
+def test_transaction_payload_timestamp_conversions() -> None:
+    # naive datetime gets converted to UTC
+    naive_dt = datetime(2026, 9, 20, 10, 0, 0)
+    payload_naive = TransactionPayload(
+        timestamp=naive_dt,
+        transaction_method="DEBIT_CARD",
+        amount_myr=Decimal("15.00"),
+        user_id=uuid4(),
+        merchant_name="FamilyMart",
+        merchant_mcc="5411",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    )
+    assert payload_naive.timestamp.tzinfo == timezone.utc
+    assert payload_naive.timestamp.hour == 10
+
+    # non-UTC timezone-aware datetime (+08:00 Malaysia time) gets converted to UTC
+    kl_tz = timezone(timedelta(hours=8))
+    aware_dt = datetime(2026, 9, 20, 16, 0, 0, tzinfo=kl_tz)
+    payload_aware = TransactionPayload(
+        timestamp=aware_dt,
+        transaction_method="CREDIT_CARD",
+        amount_myr=Decimal("88.00"),
+        user_id=uuid4(),
+        merchant_name="Uniqlo Mid Valley",
+        merchant_mcc="5651",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    )
+    assert payload_aware.timestamp.tzinfo == timezone.utc
+    assert payload_aware.timestamp.hour == 8 # 16:00 +08:00 is 08:00 UTC
+
+    # ISO 8601 string with +00:00
+    payload_iso = TransactionPayload(
+        timestamp="2026-09-20T12:00:00+00:00",
+        transaction_method="E_WALLET",
+        amount_myr=Decimal("5.50"),
+        user_id=uuid4(),
+        merchant_name="Tealive",
+        merchant_mcc="5814",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    )
+    assert payload_iso.timestamp.tzinfo == timezone.utc
+
+""" 
+    INVALIDATION TEST
+    tests TransactionPayload amount_myr constraints
+    primarily tests gt=Decimal('0.00') and decimal_places=2 validation
+"""
+def test_transaction_payload_invalid_amount() -> None:
+    # invalid: zero amount
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("0.00"), # must be greater than 0.00
+            user_id=uuid4(),
+            merchant_name="Warung Kopi",
+            merchant_mcc="5814",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+    # invalid: negative amount
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("-10.50"), # must be greater than 0.00
+            user_id=uuid4(),
+            merchant_name="Warung Kopi",
+            merchant_mcc="5814",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+    # invalid: more than 2 decimal places
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("10.999"), # max 2 decimal places allowed
+            user_id=uuid4(),
+            merchant_name="Warung Kopi",
+            merchant_mcc="5814",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+r""" (this needs to be a raw string or else there will be SyntaxWarning: invalid escape sequence '\d' warning in terminal)
+    INVALIDATION TEST
+    tests TransactionPayload merchant_mcc regex pattern validation
+    primarily tests 4-digit code constraint (pattern=r'^\d{4}$')
+"""
+def test_transaction_payload_invalid_mcc() -> None:
+    for bad_mcc in ["123", "12345", "abcd", "", "12a4"]:
+        with pytest.raises(ValidationError):
+            TransactionPayload(
+                timestamp=datetime.now(timezone.utc),
+                transaction_method="FPX",
+                amount_myr=Decimal("50.00"),
+                user_id=uuid4(),
+                merchant_name="Test Merchant",
+                merchant_mcc=bad_mcc, #  must be exactly 4 digits
+                payment_status="SUCCESS",
+                is_flagged_fraud=False
+            )
+
+""" 
+    INVALIDATION TEST
+    tests TransactionPayload Literal fields for transaction_method and payment_status
+    primarily tests Literal string enum constraints
+"""
+def test_transaction_payload_invalid_literal_fields() -> None:
+    # invalid transaction_method
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="BITCOIN", # not in Literal enum allowed payment rails
+            amount_myr=Decimal("50.00"),
+            user_id=uuid4(),
+            merchant_name="Test Merchant",
+            merchant_mcc="5411",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+    # invalid payment_status
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("50.00"),
+            user_id=uuid4(),
+            merchant_name="Test Merchant",
+            merchant_mcc="5411",
+            payment_status="CANCELLED", # not in Literal enum allowed statuses
+            is_flagged_fraud=False
+        )
+
+""" 
+    INVALIDATION TEST
+    tests TransactionPayload merchant_name min_length constraint
+    primarily tests min_length=1 validation
+"""
+def test_transaction_payload_empty_merchant_name() -> None:
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("50.00"),
+            user_id=uuid4(),
+            merchant_name="", # min length is 1
+            merchant_mcc="5411",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+""" 
+    INVALIDATION TEST
+    tests TransactionPayload extra fields forbidden configuration
+    primarily tests extra='forbid' in model_config
+"""
+def test_transaction_payload_extra_fields_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("50.00"),
+            user_id=uuid4(),
+            merchant_name="Speedmart 99",
+            merchant_mcc="5411",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False,
+            unexpected_field="should_fail_immediately" # invalid, extra fields are forbidden
+        )
+
+""" 
+    IMMUTABILITY TEST
+    tests TransactionPayload immutability
+    primarily tests frozen=True in model_config
+"""
+def test_transaction_payload_frozen_immutability() -> None:
+    payload = TransactionPayload(
+        timestamp=datetime.now(timezone.utc),
+        transaction_method="DUITNOW_QR",
+        amount_myr=Decimal("20.00"),
+        user_id=uuid4(),
+        merchant_name="KFC Malaysia",
+        merchant_mcc="5814",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    )
+    with pytest.raises(ValidationError):
+        payload.amount_myr = Decimal("30.00") # invalid, model is frozen
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
