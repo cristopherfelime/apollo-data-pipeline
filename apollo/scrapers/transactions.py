@@ -3,6 +3,7 @@
     artificial finance transaction generator using Faker and stuff
     NOTE: since this aint a scaper, TransactionGenerator will not inherit/implement BaseScraper
     v1.0 - docstrings are finished, generate_transaction() was made synchronous due to actually not having to await any async coroutines innit, Faker malaysian locale stuff apparently do not exist so I had to just write my own locale, odds of fraudulent transactions are now properly evaluated to 0.5% cuz apparently Faker.boolean chance_of_getting_true is unable to evaluate floats, user_id are no longer fully randomly generated (for artemis!)
+    v1.0.1 - added min_value constraint to amount_myr generation, user_pool are now generated in __init__ instead of as a class attribute to avoid the class attribute being shared across multiple instances (should there be more than one)
 """
 
 import logging
@@ -23,16 +24,17 @@ logger = logging.getLogger(__name__)
 """
     the transaction generator class
     attributes:
-        fake (Faker): Faker instance configured with localized Malaysian English (en_MS) provider
+        fake (Faker): standard Faker generator instance for timestamps and decimals
+        user_pool (list[UUID]): pool of 1,000 unique user UUIDs to simulate recurring user transaction patterns for Artemis
         MALAYSIAN_MERCHANTS (dict[str, list[str]]): mapping of 4-digit ISO MCC codes to authentic Malaysian merchant brands
     methods:
-        __init__ -> initializes the generator with localized (or at least malaysian companies names in english or whatever) Faker instance
-        generate_transaction -> generates a single synthetic TransactionPayload with weighted payment methods and status
+        __init__ -> initializes the generator with Faker and generates user_pool for consistent user IDs
+        generate_transaction -> generates a single synthetic TransactionPayload with weighted payment methods, status, and 0.5% fraud probability
         stream_transactions -> asynchronously streams generated transaction payloads using an async generator
 """
 class TransactionGenerator:
     fake: Faker
-    user_pool: list[UUID] = [uuid4() for _ in range(1000)] # rather than randomly generating unique uuid for every user in transaction, we can use 1k generated uuid instead so that artemis may be able to learn each user patterns
+    user_pool: list[UUID]
     MALAYSIAN_MERCHANTS: dict[str, list[str]] = {
         "5411": [  # grocery stores and supermarket
             "99 Speedmart",
@@ -138,12 +140,13 @@ class TransactionGenerator:
     }
 
     """
-        initializes the transaction generator
+        initializes the transaction generator with Faker and a pool of 1,000 user UUIDs
         arguments: self
         EXPECTED TO return: None
     """
     def __init__(self) -> None:
         self.fake = Faker()
+        self.user_pool: list[UUID] = [uuid4() for _ in range(1000)] # rather than randomly generating unique uuid for every user in transaction, we can use 1k generated uuid instead so that artemis may be able to learn each user patterns
 
     """
         generates a single fake financial transaction payload, this serves as the core method of the generator
@@ -172,7 +175,8 @@ class TransactionGenerator:
         amount_myr = self.fake.pydecimal(
             left_digits=4,
             right_digits=2,
-            positive=True
+            positive=True,
+            min_value=Decimal("0.01") # to not violate pydantic model validation
         ) # returns a Decimal object, 4 digits to the left of decimal and 2 digits to the right (so 2 decimal places, example: 9999.99), always positive too
         user_id = random.choice(self.user_pool)
         merchant_mcc = random.choice(list(self.MALAYSIAN_MERCHANTS.keys())) # randomly select an MCC category key from our Malaysian merchants dictionary above, convert dict_keys to list then pick randomly
@@ -215,15 +219,15 @@ class TransactionGenerator:
     main function just for testing directly in the terminal
 """
 async def main() -> None:
-    generator = TransactionGenerator()
+    generator: TransactionGenerator = TransactionGenerator()
     
-    tx = generator.generate_transaction()
+    tx: TransactionPayload = generator.generate_transaction()
     print(f"test generating a fake transaction:\n {tx}")
     print(f"and its json dump (see if PlainSerializer works):\n {tx.model_dump(mode='json')}\n")
 
     print("\n" + "=" * 100 + "\n") # line shi
 
-    count = 5
+    count: int = 5
     async for tx_stream in generator.stream_transactions(count=count, delay=0.1):
         print(f"test streaming transactions:\n {tx_stream}")
         print(f"their json dumps:\n {tx_stream.model_dump(mode='json')}\n")

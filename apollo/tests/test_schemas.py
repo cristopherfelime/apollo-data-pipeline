@@ -3,6 +3,7 @@
     v1.0 - comprehensive validation, html cleaning, timezone standardization, immutability, and boundary tests for ReviewPayload and FinancialNewsPayload
     v1.1 - added comprehensive test suite for TransactionPayload covering Decimal serialization, ISO timestamp parsing, MCC code validation, and immutability
     v1.1.1 - turned mechant_mcc regex pattern validation unit test block docstring to raw string to avoid dumbahh terminal warning
+    v1.2 - added boundary and invalidation tests for review_text length, news title and snippet limits, invalid timestamp string, non-UUID user_id, merchant_name max length, minimum valid amount_myr boundary, and is_flagged_fraud
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -105,6 +106,23 @@ def test_review_payload_empty_review_text() -> None:
             app_name="MAE",
             user_name="Bob",
             review_text="", # ts invalid, must be at least 2 characters
+            rating=4,
+            submitted_at=datetime.now(timezone.utc)
+        )
+
+"""
+    BOUNDARY TEST
+    tests ReviewPayload review_text max_length constraint
+    primarily tests max_length=2000 validation
+"""
+def test_review_payload_review_text_max_length() -> None:
+    """tests that review text exceeding 2000 characters raises ValidationError"""
+    with pytest.raises(ValidationError):
+        ReviewPayload(
+            app_id="com.maybank2u.life",
+            app_name="MAE",
+            user_name="Bob",
+            review_text="A" * 2001, # invalid, exceeds max 2000 characters
             rating=4,
             submitted_at=datetime.now(timezone.utc)
         )
@@ -241,6 +259,55 @@ def test_financial_news_invalid_sentiment_score() -> None:
             url="https://thestar.com.my/news",
             source="thestar.com.my",
             sentiment_score=1.5, # invalid, sentiment score must be between -1.0 and 1.0
+            published_at=datetime.now(timezone.utc)
+        )
+
+"""
+    BOUNDARY TEST
+    tests FinancialNewsPayload title min_length and max_length constraints
+    primarily tests min_length=5 and max_length=500 validations
+"""
+def test_financial_news_invalid_title_length() -> None:
+    """tests that title under 5 characters or over 500 characters raises ValidationError"""
+    # title under 5 characters
+    with pytest.raises(ValidationError):
+        FinancialNewsPayload(
+            article_uuid="news-123",
+            title="News", # min_length is 5
+            snippet="Valid snippet here",
+            url="https://thestar.com.my/news",
+            source="thestar.com.my",
+            sentiment_score=0.2,
+            published_at=datetime.now(timezone.utc)
+        )
+
+    # title over 500 characters
+    with pytest.raises(ValidationError):
+        FinancialNewsPayload(
+            article_uuid="news-123",
+            title="A" * 501, # and max_length is 500
+            snippet="Valid snippet here",
+            url="https://thestar.com.my/news",
+            source="thestar.com.my",
+            sentiment_score=0.2,
+            published_at=datetime.now(timezone.utc)
+        )
+
+"""
+    BOUNDARY TEST
+    tests FinancialNewsPayload snippet max_length constraint
+    primarily tests max_length=2000 validation
+"""
+def test_financial_news_invalid_snippet_length() -> None:
+    """tests that snippet over 2000 characters raises ValidationError"""
+    with pytest.raises(ValidationError):
+        FinancialNewsPayload(
+            article_uuid="news-123",
+            title="Valid Title Here",
+            snippet="A" * 2001, # invalid, max_length is 2000
+            url="https://thestar.com.my/news",
+            source="thestar.com.my",
+            sentiment_score=0.2,
             published_at=datetime.now(timezone.utc)
         )
 
@@ -434,6 +501,24 @@ def test_transaction_payload_invalid_amount() -> None:
             is_flagged_fraud=False
         )
 
+"""
+    VALIDATION TEST
+    tests TransactionPayload amount_myr minimum valid boundary
+    primarily tests gt=Decimal('0.00') acceptance of RM 0.01
+"""
+def test_transaction_payload_amount_minimum_boundary() -> None:
+    payload = TransactionPayload(
+        timestamp=datetime.now(timezone.utc),
+        transaction_method="DUITNOW_QR",
+        amount_myr=Decimal("0.01"), # minimum valid amount
+        user_id=uuid4(),
+        merchant_name="99 Speedmart",
+        merchant_mcc="5411",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    )
+    assert payload.amount_myr == Decimal("0.01")
+
 r""" (this needs to be a raw string or else there will be SyntaxWarning: invalid escape sequence '\d' warning in terminal)
     INVALIDATION TEST
     tests TransactionPayload merchant_mcc regex pattern validation
@@ -540,6 +625,78 @@ def test_transaction_payload_frozen_immutability() -> None:
     )
     with pytest.raises(ValidationError):
         payload.amount_myr = Decimal("30.00") # invalid, model is frozen
+
+"""
+    INVALIDATION TEST
+    tests TransactionPayload timestamp validator on malformed date string
+    primarily tests verify_and_convert_timestamp raising ValidationError
+"""
+def test_transaction_payload_invalid_timestamp() -> None:
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp="not-a-valid-timestamp", # invalid datetime string
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("50.00"),
+            user_id=uuid4(),
+            merchant_name="99 Speedmart",
+            merchant_mcc="5411",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+"""
+    INVALIDATION TEST
+    tests TransactionPayload user_id validation on invalid UUID string
+    primarily tests UUID type validation
+"""
+def test_transaction_payload_invalid_user_id() -> None:
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("50.00"),
+            user_id="invalid-uuid-string", # invalid UUID
+            merchant_name="99 Speedmart",
+            merchant_mcc="5411",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+"""
+    BOUNDARY TEST
+    tests TransactionPayload merchant_name max_length boundary
+    primarily tests max_length=500 constraint
+"""
+def test_transaction_payload_merchant_name_max_length() -> None:
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("50.00"),
+            user_id=uuid4(),
+            merchant_name="A" * 501, # exceeds max_length of 500
+            merchant_mcc="5411",
+            payment_status="SUCCESS",
+            is_flagged_fraud=False
+        )
+
+"""
+    INVALIDATION TEST
+    tests TransactionPayload is_flagged_fraud validation on non-boolean values
+    primarily tests bool type validation
+"""
+def test_transaction_payload_invalid_fraud_flag() -> None:
+    with pytest.raises(ValidationError):
+        TransactionPayload(
+            timestamp=datetime.now(timezone.utc),
+            transaction_method="DUITNOW_QR",
+            amount_myr=Decimal("50.00"),
+            user_id=uuid4(),
+            merchant_name="99 Speedmart",
+            merchant_mcc="5411",
+            payment_status="SUCCESS",
+            is_flagged_fraud="not_a_boolean" # invalid boolean
+        )
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 

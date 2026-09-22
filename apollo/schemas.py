@@ -4,6 +4,7 @@
         v1.3 - added TransactionPayload model with UTC timestamp standardization, MCC pattern checking, and Decimal amount validation for synthetic transaction logs
         v1.3.1 - fixed wrong kafka topic label in TransactionPayload docstring, modified some field names in TransactionPayload, and found out about pydantic's automatic ISO 8601 string conversion so cool
         v1.3.2 - used PlainSerializer to change model_dump(mode="json") behavior from parsing Decimal to string to immediately cast it to float, check amount_myr again
+        v1.3.3 - cleaned up TransactionPayload model_config (no aliases needed), updated outdated comments regarding native Pydantic v2 ISO 8601 parsing
 """
 
 import re # re is used for regular expressions, which is used for cleaning review text down below (re.sub())
@@ -119,7 +120,7 @@ class FinancialNewsPayload(BaseModel):
     url: Annotated[str, Field(pattern=r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")]
     source: Annotated[str, Field(description="financial news website source")]
     sentiment_score: Annotated[float | None, Field(ge=-1.0, le=1.0)] # news sentiment score is between -1 and 1, heard that sometimes its not provided so None is allowed
-    published_at: Annotated[datetime, Field(description="exact UTC timestamp of when article was published")] # original article published timestamp. the payload returns a string, so there's automatic coversion field validation below
+    published_at: Annotated[datetime, Field(description="exact UTC timestamp of when article was published")] # original article published timestamp, pydantic v2 natively parses ISO 8601 strings into datetime objects
     ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))] # when the article news payload was ingested into data pipeline
     
     # might as well use the previos html tags cleaner regex again to clean up title and snippet as well
@@ -145,7 +146,7 @@ class FinancialNewsPayload(BaseModel):
         transaction_id (UUID): unique identifier for the transaction event (auto-generated)
         timestamp (datetime): timestamp of when transaction was conducted in UTC
         transaction_method (str): payment method used (DUITNOW_QR, CREDIT_CARD, DEBIT_CARD, FPX, E_WALLET)
-        amount_myr (Decimal): monetary transaction amount in MYR (minimum RM 0.01)
+        amount_myr (Decimal): monetary transaction amount in MYR (minimum RM 0.01, serialized to float in json mode)
         user_id (UUID): unique identifier of the user who conducted the transaction
         merchant_name (str): name of the merchant or business entity
         merchant_mcc (str): 4-digit ISO 18245 merchant category code
