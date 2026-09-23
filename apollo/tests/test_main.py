@@ -11,10 +11,12 @@ from datetime import datetime, timezone
 from asyncio import CancelledError
 
 from apollo.main import main
-from apollo.schemas import ReviewPayload, FinancialNewsPayload
+from apollo.schemas import ReviewPayload, FinancialNewsPayload, TransactionPayload
 from apollo.kafka.producer import ApolloKafkaProducer
 from apollo.scrapers.play_store import PlayStoreScraper
 from apollo.scrapers.marketaux import MarketauxScraper
+from apollo.scrapers.transactions import TransactionGenerator
+from decimal import Decimal
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -55,11 +57,28 @@ def sample_news_payload():
     )
 
 @pytest.fixture
+def sample_transaction_payload():
+    """synthetic single valid TransactionPayload Pydantic model instance"""
+    return TransactionPayload(
+        transaction_id=uuid4(),
+        timestamp=datetime(2026, 9, 20, 14, 30, tzinfo=timezone.utc),
+        transaction_method="DUITNOW_QR",
+        amount_myr=Decimal("25.50"),
+        user_id=uuid4(),
+        merchant_name="Village Park Restaurant",
+        merchant_mcc="5812",
+        payment_status="SUCCESS",
+        ingested_at=datetime(2026, 9, 20, 14, 35, tzinfo=timezone.utc),
+        is_flagged_fraud=False
+    )
+
+@pytest.fixture
 def sample_producer_results():
     """synthetic producer return count dictionary"""
     return {
         "app-reviews-events": 1,
-        "market-news-events": 1
+        "market-news-events": 1,
+        "myr-transactions": 1
     }
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -72,15 +91,19 @@ def sample_producer_results():
     collecting (partition_key, event_dict) tuples, and streaming to ApolloKafkaProducer inside async context manager
 """
 @pytest.mark.anyio
-async def test_main_success(sample_review_payload, sample_news_payload, sample_producer_results) -> None:
+async def test_main_success(sample_review_payload, sample_news_payload, sample_transaction_payload, sample_producer_results) -> None:
     mock_playstore_run = AsyncMock(return_value=[sample_review_payload]) # makes a mock scraper basically, doesn't actually create a PlayStoreScraper instance
     mock_marketaux_run = AsyncMock(return_value=[sample_news_payload]) # same as above but for MarketauxScraper
+
+    async def mock_stream_transactions(count=100, delay=0.01): # mocks the async generator stream_transactions in TransactionGenerator class
+        yield sample_transaction_payload
     
     mock_producer = AsyncMock(spec=ApolloKafkaProducer) # mocks ApolloKafkaProducer class for async context manager 
     mock_producer.run.return_value = sample_producer_results # and when the run() method of the mock kafka producer above is ran, it returns a mock sample_producer_results (return count)
 
     with patch.object(PlayStoreScraper, "run", mock_playstore_run), \
          patch.object(MarketauxScraper, "run", mock_marketaux_run), \
+         patch.object(TransactionGenerator, "stream_transactions", side_effect=mock_stream_transactions), \
          patch("apollo.main.ApolloKafkaProducer") as mock_producer_class: # python's multi-line, patch both scapers' run() methods to return a mock version, and mock the ApolloKafkaProducer class that was initialized with with-as statement to return a mock instance
         
         # setup async context manager mock for ApolloKafkaProducer, context manager runs __aenter__ where we change its return value to mock_producer
@@ -97,6 +120,9 @@ async def test_main_success(sample_review_payload, sample_news_payload, sample_p
                 ],
                 "market-news-events": [
                     ("thestar.com.my", sample_news_payload.model_dump())
+                ],
+                "myr-transactions": [
+                    (str(sample_transaction_payload.user_id), sample_transaction_payload.model_dump(mode="json"))
                 ]
             },
             return_results=True
@@ -115,12 +141,17 @@ async def test_main_success(sample_review_payload, sample_news_payload, sample_p
 async def test_main_partial_scraper_failure(sample_news_payload) -> None:
     mock_playstore_run = AsyncMock(side_effect=Exception("Play Store rate limit reached")) # mock play store scraper will throw exception when run()
     mock_marketaux_run = AsyncMock(return_value=[sample_news_payload])
+
+    async def mock_empty_stream(*args, **kwargs):
+        if False: # this essentially never runs, but needed so that python marks this function as an async generator rather than a coroutine due to the async keyword
+            yield
     
     mock_producer = AsyncMock(spec=ApolloKafkaProducer)
-    mock_producer.run.return_value = {"app-reviews-events": 0, "market-news-events": 1} # mock producer result now shows 0 events from play store scraper, 1 from marketaux scraper
+    mock_producer.run.return_value = {"app-reviews-events": 0, "market-news-events": 1, "myr-transactions": 0} # mock producer result now shows 0 events from play store scraper, 1 from marketaux scraper
 
     with patch.object(PlayStoreScraper, "run", mock_playstore_run), \
          patch.object(MarketauxScraper, "run", mock_marketaux_run), \
+         patch.object(TransactionGenerator, "stream_transactions", side_effect=mock_empty_stream), \
          patch("apollo.main.ApolloKafkaProducer") as mock_producer_class:
         
         mock_producer_class.return_value.__aenter__.return_value = mock_producer
@@ -132,7 +163,8 @@ async def test_main_partial_scraper_failure(sample_news_payload) -> None:
                 "app-reviews-events": [],
                 "market-news-events": [
                     ("thestar.com.my", sample_news_payload.model_dump())
-                ]
+                ],
+                "myr-transactions": []
             },
             return_results=True
         )
@@ -146,12 +178,17 @@ async def test_main_partial_scraper_failure(sample_news_payload) -> None:
 async def test_main_all_scrapers_fail() -> None:
     mock_playstore_run = AsyncMock(side_effect=Exception("Play Store network timeout")) # both dead
     mock_marketaux_run = AsyncMock(side_effect=Exception("Marketaux API 500 error"))
+
+    async def mock_empty_stream(*args, **kwargs):
+        if False:
+            yield
     
     mock_producer = AsyncMock(spec=ApolloKafkaProducer)
     mock_producer.run.return_value = None # and now they're gone
 
     with patch.object(PlayStoreScraper, "run", mock_playstore_run), \
          patch.object(MarketauxScraper, "run", mock_marketaux_run), \
+         patch.object(TransactionGenerator, "stream_transactions", side_effect=mock_empty_stream), \
          patch("apollo.main.ApolloKafkaProducer") as mock_producer_class:
         
         mock_producer_class.return_value.__aenter__.return_value = mock_producer
@@ -161,7 +198,8 @@ async def test_main_all_scrapers_fail() -> None:
         mock_producer.run.assert_awaited_once_with(
             {
                 "app-reviews-events": [],
-                "market-news-events": []
+                "market-news-events": [],
+                "myr-transactions": []
             },
             return_results=True
         )
@@ -180,12 +218,17 @@ async def test_main_skips_unexpected_event_type(sample_review_payload) -> None:
         {"invalid": "dictionary_without_schema"}
     ])
     mock_marketaux_run = AsyncMock(return_value=[]) # empty to keep it simple for this test
+
+    async def mock_empty_stream(*args, **kwargs):
+        if False:
+            yield
     
     mock_producer = AsyncMock(spec=ApolloKafkaProducer)
-    mock_producer.run.return_value = {"app-reviews-events": 1, "market-news-events": 0}
+    mock_producer.run.return_value = {"app-reviews-events": 1, "market-news-events": 0, "myr-transactions": 0}
 
     with patch.object(PlayStoreScraper, "run", mock_playstore_run), \
          patch.object(MarketauxScraper, "run", mock_marketaux_run), \
+         patch.object(TransactionGenerator, "stream_transactions", side_effect=mock_empty_stream), \
          patch("apollo.main.ApolloKafkaProducer") as mock_producer_class:
         
         mock_producer_class.return_value.__aenter__.return_value = mock_producer
@@ -197,7 +240,8 @@ async def test_main_skips_unexpected_event_type(sample_review_payload) -> None:
                 "app-reviews-events": [
                     ("my.com.gxbank.app", sample_review_payload.model_dump())
                 ],
-                "market-news-events": []
+                "market-news-events": [],
+                "myr-transactions": []
             },
             return_results=True
         )
@@ -232,11 +276,67 @@ async def test_main_unexpected_exception_handling(sample_review_payload) -> None
     mock_playstore_run = AsyncMock(return_value=[sample_review_payload])
     mock_marketaux_run = AsyncMock(return_value=[])
 
+    async def mock_empty_stream(*args, **kwargs):
+        if False:
+            yield
+
     with patch.object(PlayStoreScraper, "run", mock_playstore_run), \
          patch.object(MarketauxScraper, "run", mock_marketaux_run), \
+         patch.object(TransactionGenerator, "stream_transactions", side_effect=mock_empty_stream), \
          patch("apollo.main.ApolloKafkaProducer", side_effect=Exception("Fatal Kafka broker connection failure")):
         
         await main() # should catch the top-level exception and return cleanly
+
+"""
+    PIPELINE TEST
+    tests main() streaming multiple synthetic transactions from TransactionGenerator,
+    verifying (user_id_str, event_dict) partition tuple generation and JSON mode float serialization
+"""
+@pytest.mark.anyio
+async def test_main_transaction_generator_streaming(sample_transaction_payload) -> None:
+    second_user_id = uuid4()
+    second_tx = TransactionPayload(
+        transaction_id=uuid4(),
+        timestamp=datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc),
+        transaction_method="CREDIT_CARD",
+        amount_myr=Decimal("199.99"),
+        user_id=second_user_id,
+        merchant_name="Shopee Malaysia",
+        merchant_mcc="5311",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    )
+
+    mock_playstore_run = AsyncMock(return_value=[])
+    mock_marketaux_run = AsyncMock(return_value=[])
+
+    async def mock_stream_transactions(count=100, delay=0.01):
+        yield sample_transaction_payload
+        yield second_tx
+
+    mock_producer = AsyncMock(spec=ApolloKafkaProducer)
+    mock_producer.run.return_value = {"app-reviews-events": 0, "market-news-events": 0, "myr-transactions": 2}
+
+    with patch.object(PlayStoreScraper, "run", mock_playstore_run), \
+         patch.object(MarketauxScraper, "run", mock_marketaux_run), \
+         patch.object(TransactionGenerator, "stream_transactions", side_effect=mock_stream_transactions), \
+         patch("apollo.main.ApolloKafkaProducer") as mock_producer_class:
+
+        mock_producer_class.return_value.__aenter__.return_value = mock_producer
+
+        await main()
+
+        mock_producer.run.assert_awaited_once_with(
+            {
+                "app-reviews-events": [],
+                "market-news-events": [],
+                "myr-transactions": [
+                    (str(sample_transaction_payload.user_id), sample_transaction_payload.model_dump(mode="json")),
+                    (str(second_tx.user_id), second_tx.model_dump(mode="json"))
+                ]
+            },
+            return_results=True
+        )
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 

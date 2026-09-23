@@ -4,6 +4,7 @@
     NOTE: since this aint a scaper, TransactionGenerator will not inherit/implement BaseScraper
     v1.0 - docstrings are finished, generate_transaction() was made synchronous due to actually not having to await any async coroutines innit, Faker malaysian locale stuff apparently do not exist so I had to just write my own locale, odds of fraudulent transactions are now properly evaluated to 0.5% cuz apparently Faker.boolean chance_of_getting_true is unable to evaluate floats, user_id are no longer fully randomly generated (for artemis!)
     v1.0.1 - added min_value constraint to amount_myr generation, user_pool are now generated in __init__ instead of as a class attribute to avoid the class attribute being shared across multiple instances (should there be more than one)
+    v1.1 - persisted user_pool to local text file (apollo/scrapers/data/user_pool.txt) with st_size check and __file__ path resolution to maintain consistent user history across pipeline runs for Artemis
 """
 
 import logging
@@ -14,10 +15,12 @@ from decimal import Decimal
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from collections.abc import AsyncIterator # apparently this is used for async generators like stream_transactions()
+from pathlib import Path # for user_pool.txt writing and loading
 
 from apollo.schemas import TransactionPayload
 
 logger = logging.getLogger(__name__)
+USER_POOL_FILE = Path(__file__).resolve().parent / "data" / "user_pool.txt" # resolves the user_pool.txt file path to the parent folder of this (transactions.py) file, which is apollo/scrapers. also for note, better to use that slash operator for pathlib.Path joining instead of hardcoding "/" for os independence
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -25,10 +28,10 @@ logger = logging.getLogger(__name__)
     the transaction generator class
     attributes:
         fake (Faker): standard Faker generator instance for timestamps and decimals
-        user_pool (list[UUID]): pool of 1,000 unique user UUIDs to simulate recurring user transaction patterns for Artemis
+        user_pool (list[UUID]): pool of 1,000 persistent user UUIDs loaded from or written to user_pool.txt for Artemis behavioral modeling
         MALAYSIAN_MERCHANTS (dict[str, list[str]]): mapping of 4-digit ISO MCC codes to authentic Malaysian merchant brands
     methods:
-        __init__ -> initializes the generator with Faker and generates user_pool for consistent user IDs
+        __init__ -> initializes the generator with Faker and loads or creates persistent user_pool from text file
         generate_transaction -> generates a single synthetic TransactionPayload with weighted payment methods, status, and 0.5% fraud probability
         stream_transactions -> asynchronously streams generated transaction payloads using an async generator
 """
@@ -140,13 +143,32 @@ class TransactionGenerator:
     }
 
     """
-        initializes the transaction generator with Faker and a pool of 1,000 user UUIDs
+        initializes the transaction generator with Faker and loads or creates a persistent pool of 1,000 user UUIDs
         arguments: self
         EXPECTED TO return: None
     """
     def __init__(self) -> None:
         self.fake = Faker()
-        self.user_pool: list[UUID] = [uuid4() for _ in range(1000)] # rather than randomly generating unique uuid for every user in transaction, we can use 1k generated uuid instead so that artemis may be able to learn each user patterns
+        self.user_pool: list[UUID] = []
+        if USER_POOL_FILE.is_file() and USER_POOL_FILE.stat().st_size > 0: # check if user_pool.txt already exist and is not empty (file size is more than 0b)
+            try:
+                with open(USER_POOL_FILE, "r", encoding="utf-8") as f: # if yes, then read it, open the file as f
+                    for line in f: # iterating through each line, reminds me of working with File/BufferedReader in java (and Scanner to an extent too ig)
+                        self.user_pool.append(UUID(line.strip())) # strip the line, cast them to UUID object, appending them to the user_pool
+            except Exception as e: # catching sum exception
+                logger.error(f"(Apollo) TransactionGenerator failed to read user_pool.txt: {e}")
+                raise e # re-raise the exception
+        else: # if user_pool.txt doesn't exist or is empty
+            try:
+                USER_POOL_FILE.parent.mkdir(parents=True, exist_ok=True) # creates parent directory of file if it doesn't exist
+                with open(USER_POOL_FILE, "w", encoding="utf-8") as f: # open the file as f
+                    for _ in range(1000): # iterate 1000 times
+                        user_uuid = uuid4() # randomly generate a uuid each iteration
+                        f.write(f"{user_uuid}\n") # writing the UUID to the file
+                        self.user_pool.append(user_uuid) # append in-memory as well to avoid redundant file reads
+            except Exception as e: # similar to above essentially
+                logger.error(f"(Apollo) TransactionGenerator failed to create user_pool.txt: {e}")
+                raise e
 
     """
         generates a single fake financial transaction payload, this serves as the core method of the generator

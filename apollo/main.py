@@ -2,20 +2,22 @@
 		main entry point and orchestrator for apollo
 		v1.0 - completed end-to-end async orchestration, polymorphic scraper execution, OCP (partition_key, event_dict) tuple streaming to ApolloKafkaProducer achieving full SoC, and centralized logging configuration
 		v1.1 - standardized logging identifiers for main orchestrator and signal handling clarity
+		v1.2 - integrated TransactionGenerator to generate and stream synthetic Malaysian banking transactions to Kafka topic 'myr-transactions' partitioned by user_id
 """
 
 import logging
 import asyncio
-from asyncio import CancelledError
 import os
 import itertools # just for flattening the results list
 from dotenv import load_dotenv
 from typing import Sequence
+from asyncio import CancelledError
 
 from apollo.scrapers.play_store import PlayStoreScraper
 from apollo.scrapers.marketaux import MarketauxScraper
+from apollo.scrapers.transactions import TransactionGenerator
 from apollo.scrapers.base import BaseScraper
-from apollo.schemas import ReviewPayload, FinancialNewsPayload
+from apollo.schemas import ReviewPayload, FinancialNewsPayload, TransactionPayload
 from apollo.kafka.producer import ApolloKafkaProducer
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ async def main() -> None:
         events: dict[str, list[tuple[str | None, dict]]] = {
             "app-reviews-events": [],
             "market-news-events": [],
+            "myr-transactions": []
         } # a dict of lists to store kafka topics and their respective (partition_key, event_dict) tuple list
 
         scrapers: Sequence[BaseScraper] = [ # future scrapers planning to be added can be put into this list, make sure it inherits BaseScraper tho
@@ -68,10 +71,16 @@ async def main() -> None:
                 else: # unexpected type handling
                     logger.warning(f"(Apollo) main orchestrator unexpectedly received '({type(event)})' from 'results' resulting in skipping the following: {event}")
 
+        # related to faker transactions
+        tx_generator: TransactionGenerator = TransactionGenerator()
+        tx_count: int = 100 # streams 100 fake transactions
+        async for tx in tx_generator.stream_transactions(count=tx_count):
+            events["myr-transactions"].append((str(tx.user_id), tx.model_dump(mode="json"))) # here we use user_id as partition key to ensure same user's transactions are sent to same partition, good for data locality and stuff
+        
         async with ApolloKafkaProducer() as producer:
             producer_results = await producer.run(events, return_results=True)
         
-        logger.info(f"(Apollo) Successfully processed play store reviews and marketaux news, and sent all data to Kafka, entire operation was successful:\n {producer_results}")
+        logger.info(f"(Apollo) Successfully processed play store reviews, marketaux news, and synthetic transactions, and sent all data to Kafka, entire operation was successful:\n {producer_results}")
 
         # print("Result of results: ") # test
         # print(results)
