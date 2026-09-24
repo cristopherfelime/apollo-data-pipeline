@@ -26,6 +26,8 @@ services:
     container_name: kafka_broker1
     ports:
       - ${KAFKA_PORT}:${KAFKA_PORT}
+    volumes: # similar thing to postgres above, this is to ensure that kafka has a volume mounted, so whenever docker compose down, all thge topics, messages, consumer offsets, etc arent reset
+      - kafka_data:/tmp/kafka-logs #hostPath:containerPath:ro
     environment:
       # note: INTERNAL for high speed inter-container communication
       # note: EXTERNAL for client/external-facing connections
@@ -40,6 +42,10 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT" # maps each listener to its security protocol (sort of type formatting u can say)
       KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS}" # forgot to add this, controls the java virtual machine heap memory under the hood
 
+      # topics and partition stuff
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # ensures new topics are automatically created
+      KAFKA_NUM_PARTITIONS: 3 # 3 is enough for local run yeah
+
       # JUST FOR THIS SINGLE NODE SETUP:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # configures the internal __consumer_offsets tracking topic to only maintain 1 copy instead of expecting a multi-broker cluster default of 3
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1 # configures the internal transactional state manager ledger to only maintain 1 copy instead of expecting a multi-broker cluster default of 3
@@ -49,3 +55,4 @@ services:
 # this allows the data to be saved even if the containers are recreated
 volumes:
   pgdata: # it will be something like ./pgdata:/var/lib/postgresql/data
+  kafka_data: # similar to above

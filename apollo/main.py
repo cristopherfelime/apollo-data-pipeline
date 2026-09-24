@@ -73,7 +73,7 @@ async def main() -> None:
 
         # related to faker transactions
         tx_generator: TransactionGenerator = TransactionGenerator()
-        tx_count: int = 100 # streams 100 fake transactions
+        tx_count: int = 10000 # streams 10000 fake transactions
         async for tx in tx_generator.stream_transactions(count=tx_count):
             events["myr-transactions"].append((str(tx.user_id), tx.model_dump(mode="json"))) # here we use user_id as partition key to ensure same user's transactions are sent to same partition, good for data locality and stuff
         

@@ -1,6 +1,7 @@
 """
     unit testing script for apollo main entry point and orchestrator in main.py
     v1.0 - unit tests for scraper concurrency, payload type classification, OCP event tuple collection, producer lifecycle, partial scraper failures, unexpected type filtering, and cancellation handling
+    v1.1 - added TransactionGenerator async stream mocking, myr-transactions topic validation, and dedicated multi-event transaction streaming pipeline test
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
