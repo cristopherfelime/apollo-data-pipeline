@@ -1,6 +1,7 @@
 """
     unit testing script for ApolloKafkaConsumer in consumer.py
     v1.1 - added start method calling assertion for mock consumer in lifecycle and context manager tests
+    v1.2 - updated default subscribed topics assertion to include 'myr-transactions', added synthetic transaction fixture and ConsumerRecord batch verification
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -60,8 +61,26 @@ def sample_news_raw_bytes():
     })
 
 @pytest.fixture
-def sample_consumer_records(sample_review_raw_bytes, sample_news_raw_bytes):
-    """synthetic list of 4 ConsumerRecord instances across both topics and multiple partition keys"""
+def sample_transaction_raw_bytes():
+    """synthetic single TransactionPayload event serialized as UTF-8 JSON bytes"""
+    return orjson.dumps({
+        "transaction_id": str(uuid4()),
+        "timestamp": "2026-09-24T18:30:00Z",
+        "transaction_method": "DUITNOW_QR",
+        "amount_myr": 28.50,
+        "user_id": str(uuid4()),
+        "merchant_name": "MR. D.I.Y.",
+        "merchant_mcc": "5331",
+        "payment_status": "SUCCESS",
+        "ingested_at": "2026-09-24T18:30:05Z",
+        "is_flagged_fraud": False
+    })
+
+@pytest.fixture
+def sample_consumer_records(sample_review_raw_bytes, sample_news_raw_bytes, sample_transaction_raw_bytes):
+    """synthetic list of 6 ConsumerRecord instances across reviews, news, and transaction topics"""
+    user_id_1 = str(uuid4()).encode()
+    user_id_2 = str(uuid4()).encode()
     return [
         ConsumerRecord(
             topic="app-reviews-events",
@@ -114,6 +133,32 @@ def sample_consumer_records(sample_review_raw_bytes, sample_news_raw_bytes):
             serialized_key_size=14,
             serialized_value_size=len(sample_news_raw_bytes),
             headers=()
+        ),
+        ConsumerRecord(
+            topic="myr-transactions",
+            partition=0,
+            offset=301,
+            timestamp=1787119348000,
+            timestamp_type=0,
+            key=user_id_1,
+            value=sample_transaction_raw_bytes,
+            checksum=None,
+            serialized_key_size=len(user_id_1),
+            serialized_value_size=len(sample_transaction_raw_bytes),
+            headers=()
+        ),
+        ConsumerRecord(
+            topic="myr-transactions",
+            partition=1,
+            offset=302,
+            timestamp=1787119349000,
+            timestamp_type=0,
+            key=user_id_2,
+            value=sample_transaction_raw_bytes,
+            checksum=None,
+            serialized_key_size=len(user_id_2),
+            serialized_value_size=len(sample_transaction_raw_bytes),
+            headers=()
         )
     ]
 
@@ -122,9 +167,11 @@ def sample_getmany_batch_dict(sample_consumer_records):
     """synthetic dict[TopicPartition, list[ConsumerRecord]] returned by aiokafka.AIOKafkaConsumer.getmany()"""
     tp_reviews = TopicPartition("app-reviews-events", 0)
     tp_news = TopicPartition("market-news-events", 0)
+    tp_tx = TopicPartition("myr-transactions", 0)
     return {
         tp_reviews: [sample_consumer_records[0], sample_consumer_records[1]],
-        tp_news: [sample_consumer_records[2], sample_consumer_records[3]]
+        tp_news: [sample_consumer_records[2], sample_consumer_records[3]],
+        tp_tx: [sample_consumer_records[4], sample_consumer_records[5]]
     }
 
 @pytest.fixture
@@ -153,7 +200,7 @@ def test_kafka_consumer_init_default_and_custom(sample_custom_consumer_config) -
     # default initialization
     default_consumer = ApolloKafkaConsumer()
     assert default_consumer.bootstrap_servers == f"{os.getenv('KAFKA_HOST')}:{os.getenv('KAFKA_PORT')}"
-    assert default_consumer._topics == ("app-reviews-events", "market-news-events")
+    assert default_consumer._topics == ("app-reviews-events", "market-news-events", "myr-transactions")
     assert default_consumer._group_id == "apollo-db-persister"
 
     # custom initialization

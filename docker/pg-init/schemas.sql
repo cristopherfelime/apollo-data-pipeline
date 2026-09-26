@@ -1,6 +1,7 @@
 /*
  postgres database initialization script
  v1.0
+ v1.0.1 - added missing semicolon at the end of idx_staging_transactions_user_history lol
  */
 
 -- table schema for staging queue of play store reviews
@@ -164,4 +165,4 @@ WHERE is_flagged_fraud = TRUE;
 -- for user behavioral profiling and transaction history lookups
 -- indexes for fast lookups of user's transaction history
 CREATE INDEX IF NOT EXISTS idx_staging_transactions_user_history
-ON staging_transactions("user_id", "timestamp" DESC)
+ON staging_transactions("user_id", "timestamp" DESC);

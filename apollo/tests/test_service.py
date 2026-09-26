@@ -1,6 +1,7 @@
 """
     unit testing script for PostgresPersister in service.py
-    v1.0
+    v1.0 - completed unit test coverage for connection pool lifecycle, conninfo, parsing, and atomic batch persistence
+    v1.1 - added synthetic TransactionPayload fixture, ConsumerRecord streaming, and staging_transactions batch persistence assertions
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -58,12 +59,30 @@ def sample_news_event():
     }
 
 @pytest.fixture
-def sample_consumer_records(sample_review_event, sample_news_event):
-    """synthetic list of 4 ConsumerRecord instances across both topics and multiple partition keys"""
+def sample_transaction_event():
+    """synthetic single TransactionPayload event dictionary"""
+    return {
+        "transaction_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "timestamp": "2026-09-24T18:30:00Z",
+        "transaction_method": "DUITNOW_QR",
+        "amount_myr": 28.50,
+        "user_id": "550e8400-e29b-41d4-a716-446655440000",
+        "merchant_name": "MR. D.I.Y.",
+        "merchant_mcc": "5331",
+        "payment_status": "SUCCESS",
+        "ingested_at": "2026-09-24T18:30:05Z",
+        "is_flagged_fraud": False
+    }
+
+@pytest.fixture
+def sample_consumer_records(sample_review_event, sample_news_event, sample_transaction_event):
+    """synthetic list of 6 ConsumerRecord instances across reviews, news, and transaction topics"""
     review_bytes_1 = orjson.dumps(sample_review_event)
     review_bytes_2 = orjson.dumps({**sample_review_event, "user_name": "Ahmad Dani", "rating": 4}) # event_id, user_name, and rating will replace the original values from unpacking sample_review_event
     news_bytes_1 = orjson.dumps(sample_news_event)
     news_bytes_2 = orjson.dumps({**sample_news_event, "article_uuid": "marketaux-uuid-67890", "title": "GXBank Expands Features"}) # similar thing as above
+    tx_bytes_1 = orjson.dumps(sample_transaction_event)
+    tx_bytes_2 = orjson.dumps({**sample_transaction_event, "transaction_id": "4fb96a75-6828-5673-c4ad-3d074f77bfb7", "amount_myr": 150.00})
 
     return [
         ConsumerRecord(
@@ -117,6 +136,32 @@ def sample_consumer_records(sample_review_event, sample_news_event):
             serialized_key_size=14,
             serialized_value_size=len(news_bytes_2),
             headers=()
+        ),
+        ConsumerRecord(
+            topic="myr-transactions",
+            partition=0,
+            offset=301,
+            timestamp=1787119348000,
+            timestamp_type=0,
+            key=b"550e8400-e29b-41d4-a716-446655440000",
+            value=tx_bytes_1,
+            checksum=None,
+            serialized_key_size=36,
+            serialized_value_size=len(tx_bytes_1),
+            headers=()
+        ),
+        ConsumerRecord(
+            topic="myr-transactions",
+            partition=1,
+            offset=302,
+            timestamp=1787119349000,
+            timestamp_type=0,
+            key=b"550e8400-e29b-41d4-a716-446655440000",
+            value=tx_bytes_2,
+            checksum=None,
+            serialized_key_size=36,
+            serialized_value_size=len(tx_bytes_2),
+            headers=()
         )
     ]
 
@@ -167,7 +212,7 @@ def sample_malformed_consumer_records(sample_review_event):
     ]
 
 @pytest.fixture
-def sample_parsed_events(sample_review_event, sample_news_event):
+def sample_parsed_events(sample_review_event, sample_news_event, sample_transaction_event):
     """synthetic dictionary of parsed event batches grouped by topic"""
     return {
         "app-reviews-events": [
@@ -177,6 +222,10 @@ def sample_parsed_events(sample_review_event, sample_news_event):
         "market-news-events": [
             sample_news_event,
             {**sample_news_event, "article_uuid": "marketaux-uuid-67890", "title": "GXBank Expands Features"}
+        ],
+        "myr-transactions": [
+            sample_transaction_event,
+            {**sample_transaction_event, "transaction_id": "4fb96a75-6828-5673-c4ad-3d074f77bfb7", "amount_myr": 150.00}
         ]
     }
 
@@ -411,7 +460,7 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
         mock_tx.__aexit__.assert_awaited_once_with(None, None, None) # NOTE: context manager exits that were passed without arguments (those exc_type, exc_val, exc_tb stuff) means that the exit was clean with no exception, we use this to check for successful transaction
 
         calls = mock_cur.executemany.await_args_list # from executemany we will get the list of all calls (awaits in this async case) and their specific arguments
-        assert len(calls) == 2 # there should be 2 calls, one for reviews and one for news
+        assert len(calls) == 3 # there should be 3 calls, one for reviews, one for news, and one for transactions
 
         # checking the first call (which is reviews)
         review_sql, review_records = calls[0].args
@@ -426,6 +475,13 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
         assert "ON CONFLICT (event_id)" in news_sql
         assert "DO NOTHING" in news_sql
         assert news_records == sample_parsed_events["market-news-events"] # check if the records are correct
+
+        # checking the third call (which is transactions)
+        tx_sql, tx_records = calls[2].args
+        assert "INSERT INTO staging_transactions" in tx_sql # check if the sql insertion query is proper
+        assert "ON CONFLICT (transaction_id)" in tx_sql
+        assert "DO NOTHING" in tx_sql
+        assert tx_records == sample_parsed_events["myr-transactions"] # check if the records are correct
 
         # finally stop the postgres persister instance
         await default_persister.stop()

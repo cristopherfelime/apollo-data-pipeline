@@ -1,5 +1,6 @@
 # docker compose thing
 # v 1.1 - pg-init folder as docker entrypoint for database initialization scripts, also added KAFKA_HEAP_OPTS to kafka_broker1
+# v 1.2 - configured 3 partitions and auto-creation for apache/kafka, added persistent kafka_data volume mount
 # used for running applications/platforms that requires multiple containers to run
 
 services:

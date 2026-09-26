@@ -2,6 +2,7 @@
     postgres service engine/model whatever u wanna call it
     v1.0 - completed PostgresPersister with atomic bulk inserts and event deserialization
     v1.1 - integrated explicit conn.transaction() context manager for atomic batch commit and automatic rollback in psycopg 3
+    v1.2 - added staging_transactions table bulk insert (sql_transactions) for 'myr-transactions' topic persistence
 """
 
 import os
@@ -201,7 +202,7 @@ class PostgresPersister:
                     async with conn.cursor() as cur:
                         # parametrized DML insertion statements stuff
                         sql_reviews: str = """
-                            INSERT INTO staging_reviews(
+                            INSERT INTO staging_reviews (
                                 event_id, 
                                 app_id, 
                                 app_name, 
@@ -218,7 +219,7 @@ class PostgresPersister:
                             DO NOTHING;
                         """ # one cool thing, these parametrized insert on the values u can pass in the key names to get their values when you passed in a mapping (dict) in executemany, if not (order based on the positional values) you get index based position in tuple instead. look down below
                         sql_marketaux: str = """
-                            INSERT INTO staging_marketaux(
+                            INSERT INTO staging_marketaux (
                                 event_id, 
                                 article_uuid, 
                                 title, 
@@ -234,12 +235,33 @@ class PostgresPersister:
                             ON CONFLICT (event_id)
                             DO NOTHING;
                         """ # ON CONFLICT (event_id) DO NOTHING guarantees kafka's at-least-once delivery behavior, implementing idempotency so if a kafka commit fails, it may retry reinserting the same events, but since the on conflict statement it won't do anything (no creating duplicate entry nor throwing any error on the database side)
+                        sql_transactions: str = """
+                            INSERT INTO staging_transactions (
+                                transaction_id,
+                                timestamp,
+                                transaction_method,
+                                amount_myr,
+                                user_id,
+                                merchant_name,
+                                merchant_mcc,
+                                payment_status,
+                                ingested_at,
+                                is_flagged_fraud
+                            )
+                            VALUES
+                                (%(transaction_id)s, %(timestamp)s, %(transaction_method)s, %(amount_myr)s, %(user_id)s, %(merchant_name)s, %(merchant_mcc)s, %(payment_status)s, %(ingested_at)s, %(is_flagged_fraud)s)
+                            ON CONFLICT (transaction_id)
+                            DO NOTHING;
+                        """
                         for topic, events in parsed_events.items():
                             if topic == "app-reviews-events": # atomic batching: postgres has this stuff where in an executemany if a single constraint or other error happens, that entire transaction will be aborted, if we put exception handling here and let the rest of the insertion to run (like for market-news-events), even though they're correct, they will not the committed to the database since they belong to the same aborted transaction, so it is better to not implement try-except at this level to prevent data loss
                                 await cur.executemany(sql_reviews, events) # so, if i pass in the list of dicts (events) directly here, it will automatically map the values based on the keys i passed in the insertion statement
                                 logger.info(f"(Apollo) Successfully persisted {len(events)} events from topic: {topic} into staging tables")
                             elif topic == "market-news-events":
                                 await cur.executemany(sql_marketaux, events) # SSDD
+                                logger.info(f"(Apollo) Successfully persisted {len(events)} events from topic: {topic} into staging tables")
+                            elif topic == "myr-transactions":
+                                await cur.executemany(sql_transactions, events)
                                 logger.info(f"(Apollo) Successfully persisted {len(events)} events from topic: {topic} into staging tables")
                             else:
                                 logger.warning(f"(Apollo) Unrecognized topic '{topic}', skipping its database insertion")

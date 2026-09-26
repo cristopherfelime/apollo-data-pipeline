@@ -2,6 +2,7 @@
     kafka consumer model
     v1.0 - completed ApolloKafkaConsumer with batch polling, manual commit, and lifecycle management
     v1.1 - added graceful unclosed client disposal on failed startup and defensive None check in get_batch()
+    v1.2 - updated default subscribed topics to include 'myr-transactions'
 """
 
 import os
@@ -42,12 +43,12 @@ class ApolloKafkaConsumer:
 
     """
         initializes apollo kafka consumer handler class
-        arguments: self, bootstrap_servers (str): network address for kafka broker (default: {os.getenv("KAFKA_HOST")}:{os.getenv("KAFKA_PORT")}), topics (tuple[str, ...]): tuple of topic names to subscribe to (default: ("app-reviews-events", "market-news-events")), group_id (str): consumer group identifier (default: "apollo-db-persister")
+        arguments: self, bootstrap_servers (str): network address for kafka broker (default: {os.getenv("KAFKA_HOST")}:{os.getenv("KAFKA_PORT")}), topics (tuple[str, ...]): tuple of topic names to subscribe to (default: ("app-reviews-events", "market-news-events", "myr-transactions")), group_id (str): consumer group identifier (default: "apollo-db-persister")
         EXPECTED TO return: None
     """
-    def __init__(self, bootstrap_servers: str=f"{os.getenv("KAFKA_HOST")}:{os.getenv("KAFKA_PORT")}", topics: tuple[str, ...]=("app-reviews-events", "market-news-events"), group_id: str="apollo-db-persister") -> None:
+    def __init__(self, bootstrap_servers: str=f"{os.getenv("KAFKA_HOST")}:{os.getenv("KAFKA_PORT")}", topics: tuple[str, ...]=("app-reviews-events", "market-news-events", "myr-transactions"), group_id: str="apollo-db-persister") -> None:
         self.bootstrap_servers: str = bootstrap_servers
-        self._topics: tuple[str, ...] = topics
+        self._topics: tuple[str, ...] = topics # change default list of subscribed topics in the parameters dont forget ts again
         self._group_id: str = group_id
         self._consumer: AIOKafkaConsumer | None = None
     
@@ -139,7 +140,7 @@ class ApolloKafkaConsumer:
                     """
 
             return_batch: list[ConsumerRecord] = []
-            batch = await self._consumer.getmany(max_records=max_records, timeout_ms=timeout_ms) # get many returns dict[TopicPartition, list[ConsumerRecord]]
+            batch: dict[TopicPartition, list[ConsumerRecord]] = await self._consumer.getmany(max_records=max_records, timeout_ms=timeout_ms) # getmany() returns dict[TopicPartition, list[ConsumerRecord]]
             for topic_partition, messages in batch.items(): # TopicPartition, list[ConsumerRecord]
                 try:
                     return_batch.extend(messages) # extend adds all messages (ConsumerRecord) in the list to the return batch
