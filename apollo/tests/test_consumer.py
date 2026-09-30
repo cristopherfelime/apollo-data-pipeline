@@ -2,6 +2,7 @@
     unit testing script for ApolloKafkaConsumer in consumer.py
     v1.1 - added start method calling assertion for mock consumer in lifecycle and context manager tests
     v1.2 - updated default subscribed topics assertion to include 'myr-transactions', added synthetic transaction fixture and ConsumerRecord batch verification
+    v1.3 - added variable type hints across test cases and fixtures
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -12,6 +13,7 @@ import logging # for exception catching test in commit()
 from uuid import uuid4
 from datetime import datetime, timezone
 from asyncio import CancelledError
+from typing import Any
 from unittest.mock import patch, AsyncMock
 from dotenv import load_dotenv
 from aiokafka import AIOKafkaConsumer
@@ -27,11 +29,11 @@ load_dotenv()
 # fixtures & synthetic test data
 
 @pytest.fixture
-def anyio_backend():
+def anyio_backend() -> str:
     return "asyncio"
 
 @pytest.fixture
-def sample_review_raw_bytes():
+def sample_review_raw_bytes() -> bytes:
     """synthetic single ReviewPayload event serialized as UTF-8 JSON bytes"""
     return orjson.dumps({
         "event_id": str(uuid4()),
@@ -46,7 +48,7 @@ def sample_review_raw_bytes():
     })
 
 @pytest.fixture
-def sample_news_raw_bytes():
+def sample_news_raw_bytes() -> bytes:
     """synthetic single FinancialNewsPayload event serialized as UTF-8 JSON bytes"""
     return orjson.dumps({
         "event_id": str(uuid4()),
@@ -61,7 +63,7 @@ def sample_news_raw_bytes():
     })
 
 @pytest.fixture
-def sample_transaction_raw_bytes():
+def sample_transaction_raw_bytes() -> bytes:
     """synthetic single TransactionPayload event serialized as UTF-8 JSON bytes"""
     return orjson.dumps({
         "transaction_id": str(uuid4()),
@@ -77,10 +79,10 @@ def sample_transaction_raw_bytes():
     })
 
 @pytest.fixture
-def sample_consumer_records(sample_review_raw_bytes, sample_news_raw_bytes, sample_transaction_raw_bytes):
+def sample_consumer_records(sample_review_raw_bytes: bytes, sample_news_raw_bytes: bytes, sample_transaction_raw_bytes: bytes) -> list[ConsumerRecord]:
     """synthetic list of 6 ConsumerRecord instances across reviews, news, and transaction topics"""
-    user_id_1 = str(uuid4()).encode()
-    user_id_2 = str(uuid4()).encode()
+    user_id_1: bytes = str(uuid4()).encode()
+    user_id_2: bytes = str(uuid4()).encode()
     return [
         ConsumerRecord(
             topic="app-reviews-events",
@@ -163,11 +165,11 @@ def sample_consumer_records(sample_review_raw_bytes, sample_news_raw_bytes, samp
     ]
 
 @pytest.fixture
-def sample_getmany_batch_dict(sample_consumer_records):
+def sample_getmany_batch_dict(sample_consumer_records: list[ConsumerRecord]) -> dict[TopicPartition, list[ConsumerRecord]]:
     """synthetic dict[TopicPartition, list[ConsumerRecord]] returned by aiokafka.AIOKafkaConsumer.getmany()"""
-    tp_reviews = TopicPartition("app-reviews-events", 0)
-    tp_news = TopicPartition("market-news-events", 0)
-    tp_tx = TopicPartition("myr-transactions", 0)
+    tp_reviews: TopicPartition = TopicPartition("app-reviews-events", 0)
+    tp_news: TopicPartition = TopicPartition("market-news-events", 0)
+    tp_tx: TopicPartition = TopicPartition("myr-transactions", 0)
     return {
         tp_reviews: [sample_consumer_records[0], sample_consumer_records[1]],
         tp_news: [sample_consumer_records[2], sample_consumer_records[3]],
@@ -175,12 +177,12 @@ def sample_getmany_batch_dict(sample_consumer_records):
     }
 
 @pytest.fixture
-def sample_empty_getmany_batch():
+def sample_empty_getmany_batch() -> dict[TopicPartition, list[ConsumerRecord]]:
     """synthetic empty dictionary returned by getmany() on poll timeout when no new messages exist"""
     return {}
 
 @pytest.fixture
-def sample_custom_consumer_config():
+def sample_custom_consumer_config() -> dict[str, Any]:
     """synthetic custom bootstrap servers, topics tuple, and group_id configuration"""
     return {
         "bootstrap_servers": "custom-kafka-broker:9094",
@@ -196,15 +198,15 @@ def sample_custom_consumer_config():
     MANAGEMENT TEST
     test ApolloKafkaConsumer initialization with default bootstrap servers and custom bootstrap servers
 """
-def test_kafka_consumer_init_default_and_custom(sample_custom_consumer_config) -> None:
+def test_kafka_consumer_init_default_and_custom(sample_custom_consumer_config: dict[str, Any]) -> None:
     # default initialization
-    default_consumer = ApolloKafkaConsumer()
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
     assert default_consumer.bootstrap_servers == f"{os.getenv('KAFKA_HOST')}:{os.getenv('KAFKA_PORT')}"
     assert default_consumer._topics == ("app-reviews-events", "market-news-events", "myr-transactions")
     assert default_consumer._group_id == "apollo-db-persister"
 
     # custom initialization
-    custom_consumer = ApolloKafkaConsumer(**sample_custom_consumer_config)
+    custom_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer(**sample_custom_consumer_config)
     assert custom_consumer.bootstrap_servers == sample_custom_consumer_config["bootstrap_servers"]
     assert custom_consumer._topics == sample_custom_consumer_config["topics"]
     assert custom_consumer._group_id == sample_custom_consumer_config["group_id"]
@@ -219,10 +221,10 @@ def test_kafka_consumer_init_default_and_custom(sample_custom_consumer_config) -
 """
 @pytest.mark.anyio
 async def test_kafka_cosumer_start_and_stop() -> None:
-    default_consumer = ApolloKafkaConsumer()
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
     assert default_consumer._consumer is None
 
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         # attempt to start the kafka consumer instance
         await default_consumer.start()
@@ -240,10 +242,10 @@ async def test_kafka_cosumer_start_and_stop() -> None:
 """
 @pytest.mark.anyio
 async def test_kafka_consumer_context_manager() -> None:
-    default_consumer = ApolloKafkaConsumer()
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
     assert default_consumer._consumer is None
 
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         # attempt to start with context manager
         async with default_consumer as c:
@@ -265,15 +267,15 @@ async def test_kafka_consumer_context_manager() -> None:
     verifies getmany() payload processing and list of ConsumerRecord are properly returned
 """
 @pytest.mark.anyio
-async def test_kafka_consumer_get_batch_valid(sample_getmany_batch_dict, sample_consumer_records) -> None: # sample_consumer_records is pretty much our expected result
-    default_consumer = ApolloKafkaConsumer()
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+async def test_kafka_consumer_get_batch_valid(sample_getmany_batch_dict: dict[TopicPartition, list[ConsumerRecord]], sample_consumer_records: list[ConsumerRecord]) -> None: # sample_consumer_records is pretty much our expected result
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     mock_consumer.getmany.return_value = sample_getmany_batch_dict # make getmany() method of AIOKafkaConsumer to return our valid sample batch fixture
     default_consumer._consumer = mock_consumer
 
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         # then we call get_batch() method, which in turn calls getmany() on the consumer instance
-        batch = await default_consumer.get_batch()
+        batch: list[ConsumerRecord] = await default_consumer.get_batch()
 
         mock_consumer.getmany.assert_awaited_once() # confirm that getmany() has been called once
         assert isinstance(batch, list) and (len(batch) == len(sample_consumer_records)) # confirm that the result is a dictionary and has the same number of items as the sample consumer records
@@ -287,13 +289,13 @@ async def test_kafka_consumer_get_batch_valid(sample_getmany_batch_dict, sample_
     tests ApolloKafkaConsumer.get_batch() with empty batch response sample sample_empty_getmany_batch
 """
 @pytest.mark.anyio
-async def test_kafka_consumer_get_batch_empty(sample_empty_getmany_batch) -> None:
-    default_consumer = ApolloKafkaConsumer()
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+async def test_kafka_consumer_get_batch_empty(sample_empty_getmany_batch: dict[TopicPartition, list[ConsumerRecord]]) -> None:
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     mock_consumer.getmany.return_value = sample_empty_getmany_batch
 
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
-        batch = await default_consumer.get_batch()
+        batch: list[ConsumerRecord] = await default_consumer.get_batch()
 
         mock_consumer.getmany.assert_awaited_once()
         assert batch == [] # verifies if an empty list was indeed returned
@@ -303,18 +305,18 @@ async def test_kafka_consumer_get_batch_empty(sample_empty_getmany_batch) -> Non
     tests ApolloKafkaConsumer.get_batch() returning nothing on one topic, and valid ConsumerRecord on the other
 """
 @pytest.mark.anyio
-async def test_kafka_consumer_get_batch_partial_topics_failure(sample_consumer_records) -> None:
-    default_consumer = ApolloKafkaConsumer()
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+async def test_kafka_consumer_get_batch_partial_topics_failure(sample_consumer_records: list[ConsumerRecord]) -> None:
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     
     # the partial return batch
-    partial_batch = {
+    partial_batch: dict[TopicPartition, list[ConsumerRecord]] = {
         TopicPartition("app-reviews-events", 0): [sample_consumer_records[0], sample_consumer_records[1]], # app-reviews-events is valid, see how nothing is returned for market news 
     }
     mock_consumer.getmany.return_value = partial_batch
 
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
-        batch = await default_consumer.get_batch()
+        batch: list[ConsumerRecord] = await default_consumer.get_batch()
         mock_consumer.getmany.assert_awaited_once()
         assert isinstance(batch, list) and (len(batch) == 2) # checks if the return is still a list and only returns 2 ConsumerRecords in total
 
@@ -324,12 +326,12 @@ async def test_kafka_consumer_get_batch_partial_topics_failure(sample_consumer_r
 """
 @pytest.mark.anyio
 async def test_kafka_consumer_get_batch_unexpected_error() -> None:
-    default_consumer = ApolloKafkaConsumer()
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
 
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         with patch.object(mock_consumer, "getmany", side_effect=Exception("Fatal something crash")): # get_batch() calls getmany() from AIOKafkaConsumer (which is mocked as mock_consumer here), modify it to raise an Exception instead
-            batch = await default_consumer.get_batch()
+            batch: list[ConsumerRecord] = await default_consumer.get_batch()
 
             mock_consumer.getmany.assert_awaited_once()
             assert batch == [] # unexpected error should return empty list
@@ -344,8 +346,8 @@ async def test_kafka_consumer_get_batch_unexpected_error() -> None:
 """
 @pytest.mark.anyio
 async def test_kafka_consumer_commit_success() -> None:
-    default_consumer = ApolloKafkaConsumer()
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         await default_consumer.start()
         await default_consumer.commit()
@@ -356,8 +358,8 @@ async def test_kafka_consumer_commit_success() -> None:
     tests ApolloKafkaConsumer.commit successfully raising Exception when consumer uninitialized
 """
 @pytest.mark.anyio
-async def test_kafka_consumer_commit_uninitialized(caplog) -> None:
-    default_consumer = ApolloKafkaConsumer()
+async def test_kafka_consumer_commit_uninitialized(caplog: pytest.LogCaptureFixture) -> None:
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=None):
         with caplog.at_level(logging.ERROR): # captures any logger message at ERROR severity
             await default_consumer.start()
@@ -369,9 +371,9 @@ async def test_kafka_consumer_commit_uninitialized(caplog) -> None:
     tests ApolloKafkaConsumer.commit handling unexpected failure from consumer.commit()
 """
 @pytest.mark.anyio
-async def test_kafka_consumer_commit_fail(caplog) -> None:
-    default_consumer = ApolloKafkaConsumer()
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+async def test_kafka_consumer_commit_fail(caplog: pytest.LogCaptureFixture) -> None:
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         with patch.object(mock_consumer, "commit", side_effect=KafkaError("commit died bruh")):
             with caplog.at_level(logging.ERROR):
@@ -386,9 +388,9 @@ async def test_kafka_consumer_commit_fail(caplog) -> None:
     tests ApolloKafkaConsumer.commit handling other exceptions than KafkaError
 """
 @pytest.mark.anyio
-async def test_kafka_consumer_commit_unexpected_error(caplog) -> None:
-    default_consumer = ApolloKafkaConsumer()
-    mock_consumer = AsyncMock(spec=AIOKafkaConsumer)
+async def test_kafka_consumer_commit_unexpected_error(caplog: pytest.LogCaptureFixture) -> None:
+    default_consumer: ApolloKafkaConsumer = ApolloKafkaConsumer()
+    mock_consumer: AsyncMock = AsyncMock(spec=AIOKafkaConsumer)
     with patch("apollo.kafka.consumer.AIOKafkaConsumer", return_value=mock_consumer):
         with patch.object(mock_consumer, "commit", side_effect=Exception("another commit error")):
             with caplog.at_level(logging.ERROR):

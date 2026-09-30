@@ -2,6 +2,7 @@
         google play reviews scraper
         v1.2.1.2 - if app_dict to if app_dict is not None so something like {} is accepted
         v1.2.2 - refactored a bit of process() here as well, explicitly map fields into ReviewPayload to safely filter raw google_play_scraper extra fields similar to MarketauxScraper
+        v1.3 - added variable type hints across scraper methods
 """
 
 import logging # logging purposes
@@ -10,12 +11,13 @@ import itertools # for flattening the list of lists
 from asyncio import CancelledError # to catch cancelled error (like KeyboardInterrupt)
 from google_play_scraper import reviews # google play scraper library we'll be using
 from pydantic import ValidationError # for catching validation errors
+from typing import Any, cast
 
 from apollo.schemas import ReviewPayload # to validate the data
 from apollo.scrapers.base import BaseScraper # to inherit the abstract class
 
 # initialize logger
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 # -------------------------------------------------------------------------------------------------------
 
@@ -34,7 +36,7 @@ logger = logging.getLogger(__name__)
 """
 # inherits BaseScraper: abstract attribute required -> data (list[BaseModel])
 class PlayStoreScraper(BaseScraper):
-    app_dict: dict
+    app_dict: dict[str, str]
 
 
     """
@@ -42,7 +44,7 @@ class PlayStoreScraper(BaseScraper):
         arguments: self, app_dict (dict): dictionary to store app ids and app names
         EXPECTED TO return: None
     """
-    def __init__(self, app_dict: dict=None) -> None:
+    def __init__(self, app_dict: dict[str, str] | None=None) -> None:
         if app_dict is not None:
             self.app_dict = app_dict
         else: # default instance app_dict
@@ -69,7 +71,7 @@ class PlayStoreScraper(BaseScraper):
         arguments: self
         EXPECTED TO return: dict (the app_dict)
     """
-    def get_app_dict(self) -> dict:
+    def get_app_dict(self) -> dict[str, str]:
         return self.app_dict
 
     """
@@ -89,7 +91,7 @@ class PlayStoreScraper(BaseScraper):
         EXPECTED TO return: list of dict (raw review data scraped by the package)
     """
     async def fetch(self, target: str | list[str] | None=None, count: int=1, lang: str="ms", country: str="my") -> list[dict] | list[list[dict]]: # lang and country needs default values to follow Listkov Substitution Principle, PlayStoreScraper is a child class of BaseScraper and BaseScraper doesnt have default values for lang and country, so we need to provide them here, if not it'll raise TypeError: fetch() missing 2 required positional argument: 'lang', 'country' ()
-        responses = []
+        responses: list[dict] | list[list[dict]] = []
         target = target or list(self.app_dict.keys()) # if target is None, set it to all app ids in the app_dict
         try:
             if isinstance(target, str): # for singular target
@@ -101,7 +103,7 @@ class PlayStoreScraper(BaseScraper):
                     country=country
                 )
             elif isinstance(target, list): # for multiple targets
-                tasks_fetch = [
+                tasks_fetch: list[Any] = [
                     asyncio.to_thread(
                         reviews,
                         t,
@@ -111,7 +113,7 @@ class PlayStoreScraper(BaseScraper):
                     )
                     for t in target # for every target in the targets list, make a fetch task for them and append them to the list above
                 ] # list containing fetch tasks to be passed into gather()
-                results_list = await asyncio.gather(*tasks_fetch)
+                results_list: list[Any] = await asyncio.gather(*tasks_fetch)
                 responses = [r[0] for r in results_list] # google_play_scraper returns a list of (results_list, token), we only need the results_list so we take r[0]
         except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt
             logger.info(f"(Apollo) PlayStoreScraper.fetch() was running, then was stopped by the user (KeyboardInterrupt)")
@@ -127,9 +129,11 @@ class PlayStoreScraper(BaseScraper):
         arguments: self, payload (list of raw review data scraped by the package), target (target where the review responses come from, default is None)
         EXPECTED TO return: list of ReviewPayload (validated and cleaned data based on the schemas in schemas.py)
     """
-    async def process(self, payload: list[dict], target: str | None=None) -> list[ReviewPayload]:
+    async def process(self, payload: dict | list[dict], target: str | None=None) -> list[ReviewPayload]: # type: ignore # check marketaux.py for explanation regarding ts comment
         try:
-            processed_reviews = [] # to store all the processed reviews from all the raw api responses for the final return
+            if isinstance(payload, dict): # if a single review dict was passed, we just wrap it in a list (because, well, you cant really iterate over dict flatly like below)
+                payload = [payload]
+            processed_reviews: list[ReviewPayload] = [] # to store all the processed reviews from all the raw api responses for the final return
             for review in payload: # iterate through each of the raw api responses for the current app id
                 if target and (target in self.app_dict.keys()): # if target is provided
                     app_name = self.app_dict.get(target)
@@ -138,7 +142,7 @@ class PlayStoreScraper(BaseScraper):
                     app_name = "Unknown App"
                     app_id = "com.unknown"
                 try: # try to validate each reviews
-                    extracted_review = { # explicitly extract only the fields required by ReviewPayload to avoid extra_forbidden ValidationError from raw scraper fields (such as reviewId, userImage, thumbsUpCount)
+                    extracted_review: dict[str, Any] = { # explicitly extract only the fields required by ReviewPayload to avoid extra_forbidden ValidationError from raw scraper fields (such as reviewId, userImage, thumbsUpCount)
                         "app_id": app_id,
                         "app_name": app_name,
                         "userName": review.get("userName"),
@@ -147,7 +151,7 @@ class PlayStoreScraper(BaseScraper):
                         "appVersion": review.get("appVersion") or review.get("reviewCreatedVersion"),
                         "at": review.get("at")
                     }
-                    validated_review = ReviewPayload.model_validate(extracted_review)
+                    validated_review: ReviewPayload = ReviewPayload.model_validate(extracted_review)
                     processed_reviews.append(validated_review) # if there's no ValidationError raised by pydantic, then append the validated review to processed_reviews
                 except ValidationError as e: # if a review data does not match the schema, validation failed so log an error and skip the review
                     logger.error(f"(Apollo) Model validation error in PlayStoreScraper.process(), skipping following review: {e}")
@@ -167,19 +171,19 @@ class PlayStoreScraper(BaseScraper):
         arguments: self, count (number of data to fetch per app), lang (language of the reviews to fetch, default is ms or malaysian), country (country of the reviews to fetch, default is my or malaysian)
         EXPECTED TO return: list of ReviewPayload (now with all the reviews combined from all apps!)
     """
-    async def run(self, count: int=100, lang: str="ms", country: str="my") -> list[ReviewPayload]:
+    async def run(self, count: int=100, lang: str="ms", country: str="my") -> list[ReviewPayload]: # type: ignore # check marketaux.py for explanation regarding this comment
         try:
             # fetch
-            app_ids = list(self.app_dict.keys()) # list of app ids to be scraped
-            fetch_results = await self.fetch(app_ids, count, lang, country) #  execute the fetch method concurrently
-            raw_data_map = dict(zip(app_ids, fetch_results)) # map results back to their respective app id (asyncio.gather guarantees following the order the tasks were given so zip is viable), maintains O(1) rather than hardcoding list index for each app (gx_app = fetch_results[0] and etc)
+            app_ids: list[str] = list(self.app_dict.keys()) # list of app ids to be scraped
+            fetch_results: list[dict] | list[list[dict]] = await self.fetch(app_ids, count, lang, country) #  execute the fetch method concurrently
+            raw_data_map: dict[str, Any] = dict(zip(app_ids, fetch_results)) # map results back to their respective app id (asyncio.gather guarantees following the order the tasks were given so zip is viable), maintains O(1) rather than hardcoding list index for each app (gx_app = fetch_results[0] and etc)
 
             # process and validate
-            tasks_process = [self.process(raw_data_map[app_id], app_id) for app_id in app_ids] # similar process above but for processing the reviews instead
-            processed_results = await asyncio.gather(*tasks_process)
+            tasks_process: list[Any] = [self.process(raw_data_map[app_id], app_id) for app_id in app_ids] # similar process above but for processing the reviews instead, cast() to bypass type-checking
+            processed_results: list[list[ReviewPayload]] = await asyncio.gather(*tasks_process)
 
             # asyncio.gather() returns a list of returns from each of its tasks, which means we must flatten them here
-            combined_results = list(itertools.chain.from_iterable(processed_results)) # should work now, fetch failures now returns empty list and process failures didnt append anything
+            combined_results: list[ReviewPayload] = list(itertools.chain.from_iterable(processed_results)) # should work now, fetch failures now returns empty list and process failures didnt append anything
 
             return combined_results
         except CancelledError: # handle CancelledError that may arise from the KeyboardInterrupt

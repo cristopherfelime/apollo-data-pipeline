@@ -1,6 +1,7 @@
 """
     unit testing script for apollo MarketauxScraper in marketaux.py
     v1.0 - unit tests for parameter management, client lifecycle, context manager, mocked HTTP responses, multi-level error handling, and run pipeline
+    v1.1 - added variable type hints and response instance type assertions across test cases and fixtures
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -9,6 +10,7 @@ import httpx
 from unittest.mock import patch, AsyncMock # AsyncMock is to mock asynchronous (coroutines-based) objects here, will be used to mock httpx.AsyncClient later
 from datetime import datetime, timezone
 from uuid import UUID
+from typing import Any
 
 from apollo.scrapers.marketaux import MarketauxScraper
 from apollo.schemas import FinancialNewsPayload
@@ -18,11 +20,11 @@ from apollo.schemas import FinancialNewsPayload
 # fixtures & synthetic test data
 
 @pytest.fixture
-def anyio_backend():
+def anyio_backend() -> str:
     return "asyncio"
 
 @pytest.fixture
-def sample_marketaux_api_response():
+def sample_marketaux_api_response() -> dict[str, Any]:
     """synthetic raw marketaux REST API response payload matching production API structure with extra fields"""
     return {
         "meta": {
@@ -70,7 +72,7 @@ def sample_marketaux_api_response():
     }
 
 @pytest.fixture
-def sample_marketaux_no_sentiment_response():
+def sample_marketaux_no_sentiment_response() -> dict[str, Any]:
     """synthetic raw marketaux response without entities / sentiment score matching production API"""
     return {
         "meta": {"found": 1, "returned": 1, "limit": 3, "page": 1},
@@ -94,7 +96,7 @@ def sample_marketaux_no_sentiment_response():
     }
 
 @pytest.fixture
-def sample_marketaux_malformed_response():
+def sample_marketaux_malformed_response() -> dict[str, Any]:
     """synthetic marketaux response containing one valid item and one malformed item matching production API"""
     return {
         "meta": {"found": 2, "returned": 2, "limit": 3, "page": 1},
@@ -142,16 +144,16 @@ def sample_marketaux_malformed_response():
 """
 def test_marketaux_init_default_and_custom() -> None:
     # default initialization
-    default_scraper = MarketauxScraper()
+    default_scraper: MarketauxScraper = MarketauxScraper()
     assert default_scraper.params.get("country") == "my" # check if default country is Malaysia
     assert "Maybank" in default_scraper.search_targets # check if Maybank is in default search targets
     assert len(default_scraper.search_targets) == 4 # check if default search targets length is 4
     assert default_scraper.client is None # check if client is None
 
     # custom initialization
-    custom_params = {"api_token": "test_token", "limit": 5} # custom params
-    custom_targets = ["CIMB", "Public Bank"] # custom search targets
-    custom_scraper = MarketauxScraper(params=custom_params, search_targets=custom_targets)
+    custom_params: dict[str, Any] = {"api_token": "test_token", "limit": 5} # custom params
+    custom_targets: list[str] = ["CIMB", "Public Bank"] # custom search targets
+    custom_scraper: MarketauxScraper = MarketauxScraper(params=custom_params, search_targets=custom_targets)
     assert custom_scraper.params == custom_params # check if custom params are set
     assert custom_scraper.search_targets == custom_targets # check if custom search targets are set
 
@@ -160,7 +162,7 @@ def test_marketaux_init_default_and_custom() -> None:
     tests MarketauxScraper add_params and remove_params methods
 """
 def test_marketaux_params_management() -> None:
-    scraper = MarketauxScraper(params={"api_token": "token123"}) # initialize scraper with custom params
+    scraper: MarketauxScraper = MarketauxScraper(params={"api_token": "token123"}) # initialize scraper with custom params
     assert scraper.params == {"api_token": "token123"} # check if custom params are set
 
     # add params
@@ -178,7 +180,7 @@ def test_marketaux_params_management() -> None:
     tests MarketauxScraper add_search_targets, remove_search_targets, and set_endpoint methods
 """
 def test_marketaux_search_targets_and_endpoint_management() -> None:
-    scraper = MarketauxScraper(search_targets=["Maybank"]) # initialize scraper with custom search targets
+    scraper: MarketauxScraper = MarketauxScraper(search_targets=["Maybank"]) # initialize scraper with custom search targets
     
     # add search targets
     scraper.add_search_targets(["Boost Bank", "GX Bank"]) # add search targets
@@ -189,7 +191,7 @@ def test_marketaux_search_targets_and_endpoint_management() -> None:
     assert scraper.search_targets == ["Boost Bank", "GX Bank"] # check if search targets are set, removed properly from search_targets
 
     # set endpoint
-    custom_url = "https://api.marketaux.com/v1/news/custom" # custom url for endpoint
+    custom_url: str = "https://api.marketaux.com/v1/news/custom" # custom url for endpoint
     scraper.set_endpoint(custom_url) # set endpoint
     assert scraper.endpoint == custom_url # check if endpoint is set, added properly to endpoint
 
@@ -203,10 +205,10 @@ def test_marketaux_search_targets_and_endpoint_management() -> None:
 """
 @pytest.mark.anyio
 async def test_marketaux_client_lifecycle() -> None:
-    scraper = MarketauxScraper()
+    scraper: MarketauxScraper = MarketauxScraper()
     assert scraper.client is None # check if client is None, which it should be by default
 
-    mock_client = AsyncMock(spec=httpx.AsyncClient) # create mock async httpx.AsyncClient instance
+    mock_client: AsyncMock = AsyncMock(spec=httpx.AsyncClient) # create mock async httpx.AsyncClient instance
     with patch("apollo.scrapers.marketaux.httpx.AsyncClient", return_value=mock_client): # basically patches the imported httpx module (the AsyncClient class specifically) to start a mock httpx.AsyncClient instead of the actual httpx.AsyncClient that opens up network connections for real, happens in start_client()
         # start client
         await scraper.start_client()
@@ -223,10 +225,10 @@ async def test_marketaux_client_lifecycle() -> None:
 """
 @pytest.mark.anyio
 async def test_marketaux_context_manager() -> None:
-    scraper = MarketauxScraper()
+    scraper: MarketauxScraper = MarketauxScraper()
     assert scraper.client is None
 
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client: AsyncMock = AsyncMock(spec=httpx.AsyncClient)
     with patch("apollo.scrapers.marketaux.httpx.AsyncClient", return_value=mock_client):
         async with scraper as s: # the context manager itself
             assert s is scraper # testing the scraper instance if it was set properly
@@ -244,19 +246,20 @@ async def test_marketaux_context_manager() -> None:
     tests MarketauxScraper.fetch() with a single target endpoint using mocked httpx.AsyncClient
 """
 @pytest.mark.anyio
-async def test_marketaux_fetch_single_target(sample_marketaux_api_response) -> None:
-    scraper = MarketauxScraper()
-    mock_request = httpx.Request("GET", "https://api.marketaux.com/v1/news/all") # mock get (read) request for single target to marketaux api
-    mock_response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request) # mock status code 200 response with json body (from sample above) when the request above is made
+async def test_marketaux_fetch_single_target(sample_marketaux_api_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_request: httpx.Request = httpx.Request("GET", "https://api.marketaux.com/v1/news/all") # mock get (read) request for single target to marketaux api
+    mock_response: httpx.Response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request) # mock status code 200 response with json body (from sample above) when the request above is made
 
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client: AsyncMock = AsyncMock(spec=httpx.AsyncClient)
     mock_client.get.return_value = mock_response # ensures that client.get() returns mock_response, as the fetch() method uses this
     scraper.client = mock_client # the client attribute is set to mock_client 
 
-    result = await scraper.fetch(target="https://api.marketaux.com/v1/news/all", count=1) # target is the endpoint, count=1 means only 1 request is made
+    result: list[httpx.Response | BaseException] = await scraper.fetch(target="https://api.marketaux.com/v1/news/all", count=1) # target is the endpoint, count=1 means only 1 request is made
     
     mock_client.get.assert_called_once() # ensures that client.get() was called only once from the fetch method calling above
     assert len(result) == 1 # ensures that only 1 result was returned
+    assert isinstance(result[0], httpx.Response) #  ensures that is a httpx.Response object
     assert result[0].status_code == 200 # ensures that the result has status code 200
     assert result[0].json() == sample_marketaux_api_response # ensures that the result has the same json body as the mock response
 
@@ -265,20 +268,22 @@ async def test_marketaux_fetch_single_target(sample_marketaux_api_response) -> N
     tests MarketauxScraper.fetch() with multiple target endpoints running concurrently
 """
 @pytest.mark.anyio
-async def test_marketaux_fetch_multiple_targets(sample_marketaux_api_response) -> None:
-    scraper = MarketauxScraper()
-    mock_request = httpx.Request("GET", scraper.endpoint) # scraper.endpoint is the exact same url as above anyways
-    mock_response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
-    targets = ["https://api.marketaux.com/v1/news/1", "https://api.marketaux.com/v1/news/2"] # list of endpoints to be fetched concurrently
+async def test_marketaux_fetch_multiple_targets(sample_marketaux_api_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_request: httpx.Request = httpx.Request("GET", scraper.endpoint) # scraper.endpoint is the exact same url as above anyways
+    mock_response: httpx.Response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
+    targets: list[str] = ["https://api.marketaux.com/v1/news/1", "https://api.marketaux.com/v1/news/2"] # list of endpoints to be fetched concurrently
 
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client: AsyncMock = AsyncMock(spec=httpx.AsyncClient)
     mock_client.get.return_value = mock_response
     scraper.client = mock_client
 
-    result = await scraper.fetch(target=targets, count=1)
+    result: list[httpx.Response | BaseException] = await scraper.fetch(target=targets, count=1)
     
     assert mock_client.get.call_count == 2 # ensures that client.get() was called twice, once for each target
     assert len(result) == 2 # ensures that only 2 results were returned
+    assert isinstance(result[0], httpx.Response) # ensures that the first result is a httpx.Response object
+    assert isinstance(result[1], httpx.Response) # ensures that the second result is a httpx.Response object
     assert result[0].status_code == 200 # ensures that the first result has status code 200
     assert result[1].status_code == 200 # ensures that the second result has status code 200
 
@@ -288,10 +293,10 @@ async def test_marketaux_fetch_multiple_targets(sample_marketaux_api_response) -
 """
 @pytest.mark.anyio
 async def test_marketaux_fetch_exception_handling() -> None:
-    scraper = MarketauxScraper()
+    scraper: MarketauxScraper = MarketauxScraper()
 
     with patch.object(scraper, "start_client", new_callable=AsyncMock, side_effect=Exception("Socket creation failure")): # start_client() is an asynchronous method, so instead of using MagicMock we gotta use AsyncMock
-        result = await scraper.fetch()
+        result: list[httpx.Response | BaseException] = await scraper.fetch()
         assert result == [] # testing if the fetch() method returns an empty list when encountering unexpected exceptions
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -304,14 +309,14 @@ async def test_marketaux_fetch_exception_handling() -> None:
     verifies entities sentiment score extraction and Pydantic validation
 """
 @pytest.mark.anyio
-async def test_marketaux_process_valid_response(sample_marketaux_api_response) -> None:
-    scraper = MarketauxScraper()
-    mock_request = httpx.Request("GET", scraper.endpoint)
-    mock_response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
+async def test_marketaux_process_valid_response(sample_marketaux_api_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_request: httpx.Request = httpx.Request("GET", scraper.endpoint)
+    mock_response: httpx.Response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
 
-    processed = await scraper.process([mock_response]) # pass the mock response to process() method inside a list
+    processed: list[FinancialNewsPayload] = await scraper.process([mock_response]) # pass the mock response to process() method inside a list
     assert len(processed) == 1 # ensures that only 1 processed article is returned (as only 1 mock response was passed)
-    article = processed[0] # take the first (and only) processed article
+    article: FinancialNewsPayload = processed[0] # take the first (and only) processed article
 
     assert isinstance(article, FinancialNewsPayload) # verifies that the processed article is an instance of FinancialNewsPayload
     assert article.article_uuid == "marketaux-article-uuid-12345" # verifies the article_uuid
@@ -327,14 +332,14 @@ async def test_marketaux_process_valid_response(sample_marketaux_api_response) -
     verifies sentiment_score defaults to None
 """
 @pytest.mark.anyio
-async def test_marketaux_process_missing_sentiment_fallback(sample_marketaux_no_sentiment_response) -> None:
-    scraper = MarketauxScraper()
-    mock_request = httpx.Request("GET", scraper.endpoint)
-    mock_response = httpx.Response(200, json=sample_marketaux_no_sentiment_response, request=mock_request) # this time the mock response object carries the no sentiment sample response version
+async def test_marketaux_process_missing_sentiment_fallback(sample_marketaux_no_sentiment_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_request: httpx.Request = httpx.Request("GET", scraper.endpoint)
+    mock_response: httpx.Response = httpx.Response(200, json=sample_marketaux_no_sentiment_response, request=mock_request) # this time the mock response object carries the no sentiment sample response version
 
-    processed = await scraper.process([mock_response])
+    processed: list[FinancialNewsPayload] = await scraper.process([mock_response])
     assert len(processed) == 1
-    article = processed[0]
+    article: FinancialNewsPayload = processed[0]
 
     assert article.article_uuid == "marketaux-article-uuid-67890" # uuid check why not
     assert article.sentiment_score is None # should fallback to None here
@@ -344,14 +349,14 @@ async def test_marketaux_process_missing_sentiment_fallback(sample_marketaux_no_
     tests MarketauxScraper.process() skipping network exceptions in payload (from asyncio.gather())
 """
 @pytest.mark.anyio
-async def test_marketaux_process_skips_network_exceptions(sample_marketaux_api_response) -> None:
-    scraper = MarketauxScraper()
-    mock_request = httpx.Request("GET", scraper.endpoint)
-    valid_response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
-    timeout_exception = httpx.TimeoutException("Read timed out") # as the other fetching result
+async def test_marketaux_process_skips_network_exceptions(sample_marketaux_api_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_request: httpx.Request = httpx.Request("GET", scraper.endpoint)
+    valid_response: httpx.Response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
+    timeout_exception: httpx.TimeoutException = httpx.TimeoutException("Read timed out") # as the other fetching result
 
     # batch containing 1 timeout exception and 1 valid response
-    processed = await scraper.process([timeout_exception, valid_response])
+    processed: list[FinancialNewsPayload] = await scraper.process([timeout_exception, valid_response])
     assert len(processed) == 1 # only 1 valid response (2 total item) so 1 processed article returned
     assert processed[0].article_uuid == "marketaux-article-uuid-12345" # as the timeout exception is skipped
 
@@ -360,15 +365,15 @@ async def test_marketaux_process_skips_network_exceptions(sample_marketaux_api_r
     tests MarketauxScraper.process() skipping HTTP status code errors (like HTTP 429 Too Many Requests and HTTP 500 Internal Server Error)
 """
 @pytest.mark.anyio
-async def test_marketaux_process_skips_http_status_errors(sample_marketaux_api_response) -> None:
-    scraper = MarketauxScraper()
-    mock_request = httpx.Request("GET", scraper.endpoint)
-    valid_response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
-    error_response_429 = httpx.Response(429, json={"error": "Rate limit reached"}, request=mock_request)
-    error_response_500 = httpx.Response(500, json={"error": "Internal server error"}, request=mock_request)
+async def test_marketaux_process_skips_http_status_errors(sample_marketaux_api_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_request: httpx.Request = httpx.Request("GET", scraper.endpoint)
+    valid_response: httpx.Response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
+    error_response_429: httpx.Response = httpx.Response(429, json={"error": "Rate limit reached"}, request=mock_request)
+    error_response_500: httpx.Response = httpx.Response(500, json={"error": "Internal server error"}, request=mock_request)
 
     # batch containing error status responses and 1 valid response
-    processed = await scraper.process([error_response_429, error_response_500, valid_response])
+    processed: list[FinancialNewsPayload] = await scraper.process([error_response_429, error_response_500, valid_response])
     assert len(processed) == 1 # only 1 valid response (3 total item) so 1 processed article returned
     assert processed[0].article_uuid == "marketaux-article-uuid-12345" # as the error responses are skipped
 
@@ -377,12 +382,12 @@ async def test_marketaux_process_skips_http_status_errors(sample_marketaux_api_r
     tests MarketauxScraper.process() skipping invalid individual news items without rejecting the whole batch
 """
 @pytest.mark.anyio
-async def test_marketaux_process_skips_invalid_news_items(sample_marketaux_malformed_response) -> None:
-    scraper = MarketauxScraper()
-    mock_request = httpx.Request("GET", scraper.endpoint)
-    response = httpx.Response(200, json=sample_marketaux_malformed_response, request=mock_request) # uses malformed sample response here (different from no sentiment response version)
+async def test_marketaux_process_skips_invalid_news_items(sample_marketaux_malformed_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_request: httpx.Request = httpx.Request("GET", scraper.endpoint)
+    response: httpx.Response = httpx.Response(200, json=sample_marketaux_malformed_response, request=mock_request) # uses malformed sample response here (different from no sentiment response version)
 
-    processed = await scraper.process([response])
+    processed: list[FinancialNewsPayload] = await scraper.process([response])
     # only the valid item should be processed, malformed item skipped
     assert len(processed) == 1 # only 1 valid response (1 total item) so 1 processed article returned
     assert processed[0].article_uuid == "valid-news-1" # as the malformed response is skipped
@@ -397,15 +402,15 @@ async def test_marketaux_process_skips_invalid_news_items(sample_marketaux_malfo
     verifies keyword batching, client lifecycle management, and FinancialNewsPayload return list
 """
 @pytest.mark.anyio
-async def test_marketaux_run_standalone_success(sample_marketaux_api_response) -> None:
-    scraper = MarketauxScraper(search_targets=["Maybank", "GX Bank"])
-    mock_request = httpx.Request("GET", scraper.endpoint)
-    mock_response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+async def test_marketaux_run_standalone_success(sample_marketaux_api_response: dict[str, Any]) -> None:
+    scraper: MarketauxScraper = MarketauxScraper(search_targets=["Maybank", "GX Bank"])
+    mock_request: httpx.Request = httpx.Request("GET", scraper.endpoint)
+    mock_response: httpx.Response = httpx.Response(200, json=sample_marketaux_api_response, request=mock_request)
+    mock_client: AsyncMock = AsyncMock(spec=httpx.AsyncClient)
 
     with patch("apollo.scrapers.marketaux.httpx.AsyncClient", return_value=mock_client): # required since open_locally = True
         with patch.object(scraper, "fetch", new_callable=AsyncMock, return_value=[mock_response]) as mock_fetch:
-            results = await scraper.run(count=1)
+            results: list[FinancialNewsPayload] = await scraper.run(count=1)
             assert mock_fetch.call_count == 2 # called for Maybank and GX Bank
             assert len(results) == 2 # both Maybank and GX Bank should be processed
             assert all(isinstance(r, FinancialNewsPayload) for r in results) # all results should be FinancialNewsPayload objects, all() returns True if all elements inside of it are True
@@ -416,12 +421,12 @@ async def test_marketaux_run_standalone_success(sample_marketaux_api_response) -
 """
 @pytest.mark.anyio
 async def test_marketaux_run_unexpected_error() -> None:
-    scraper = MarketauxScraper()
-    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    scraper: MarketauxScraper = MarketauxScraper()
+    mock_client: AsyncMock = AsyncMock(spec=httpx.AsyncClient)
 
     with patch("apollo.scrapers.marketaux.httpx.AsyncClient", return_value=mock_client):
         with patch.object(scraper, "fetch", new_callable=AsyncMock, side_effect=Exception("Fatal network crash")):
-            results = await scraper.run(count=1)
+            results: list[FinancialNewsPayload] = await scraper.run(count=1)
             assert results == [] # Ok empty list should be returned by run() if entire batch failed
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------

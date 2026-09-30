@@ -3,6 +3,7 @@
     v1.0 - completed consumer orchestrator integrating ApolloKafkaConsumer with PostgresPersister, cooperative graceful shutdown (SIGINT/SIGTERM), rate-limiting backoff, and at-least-once offset commitment
     v1.1 - added unparseable batch or offset acknowledgement guard to avoid infinite looping and broker downtime backoff
     v1.1.1 - removed unused Callable object import from typing package lol
+    v1.2 - added variable type hints across consumer daemon lifecycle
 """
 
 import logging
@@ -17,7 +18,7 @@ from aiokafka.structs import ConsumerRecord
 from apollo.kafka.consumer import ApolloKafkaConsumer
 from apollo.database.service import PostgresPersister
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -26,8 +27,8 @@ logger = logging.getLogger(__name__)
     listens to Kafka topics, persists event batches idempotently to PostgreSQL staging tables, and acknowledges consumer offsets
 """
 async def main() -> None:
-    loop = asyncio.get_running_loop() # get the current running asyncio event loop
-    shutdown_event = asyncio.Event() # creates an event to be set when the consumer daemon needs to shut down
+    loop: asyncio.AbstractEventLoop = asyncio.get_running_loop() # get the current running asyncio event loop
+    shutdown_event: asyncio.Event = asyncio.Event() # creates an event to be set when the consumer daemon needs to shut down
 
     """
         handles shutdown signals to gracefully stop the consumer daemon (look at that, a nested function)

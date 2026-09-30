@@ -2,6 +2,7 @@
     unit testing script for PostgresPersister in service.py
     v1.0 - completed unit test coverage for connection pool lifecycle, conninfo, parsing, and atomic batch persistence
     v1.1 - added synthetic TransactionPayload fixture, ConsumerRecord streaming, and staging_transactions batch persistence assertions
+    v1.2 - added variable type hints across test cases and fixtures
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -11,6 +12,7 @@ import logging
 import orjson
 from uuid import uuid4
 from asyncio import CancelledError
+from typing import Any
 from unittest.mock import patch, AsyncMock, MagicMock
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
@@ -25,11 +27,11 @@ load_dotenv()
 # fixtures & synthetic test data
 
 @pytest.fixture
-def anyio_backend():
+def anyio_backend() -> str:
     return "asyncio"
 
 @pytest.fixture
-def sample_review_event():
+def sample_review_event() -> dict[str, Any]:
     """synthetic single ReviewPayload event dictionary"""
     return {
         "event_id": "str(uuid4())-but-its-a-sample-for-review-events",
@@ -44,7 +46,7 @@ def sample_review_event():
     }
 
 @pytest.fixture
-def sample_news_event():
+def sample_news_event() -> dict[str, Any]:
     """synthetic single FinancialNewsPayload event dictionary"""
     return {
         "event_id": "str(uuid4())-but-its-a-sample-for-news-events",
@@ -59,7 +61,7 @@ def sample_news_event():
     }
 
 @pytest.fixture
-def sample_transaction_event():
+def sample_transaction_event() -> dict[str, Any]:
     """synthetic single TransactionPayload event dictionary"""
     return {
         "transaction_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -75,14 +77,14 @@ def sample_transaction_event():
     }
 
 @pytest.fixture
-def sample_consumer_records(sample_review_event, sample_news_event, sample_transaction_event):
+def sample_consumer_records(sample_review_event: dict[str, Any], sample_news_event: dict[str, Any], sample_transaction_event: dict[str, Any]) -> list[ConsumerRecord]:
     """synthetic list of 6 ConsumerRecord instances across reviews, news, and transaction topics"""
-    review_bytes_1 = orjson.dumps(sample_review_event)
-    review_bytes_2 = orjson.dumps({**sample_review_event, "user_name": "Ahmad Dani", "rating": 4}) # event_id, user_name, and rating will replace the original values from unpacking sample_review_event
-    news_bytes_1 = orjson.dumps(sample_news_event)
-    news_bytes_2 = orjson.dumps({**sample_news_event, "article_uuid": "marketaux-uuid-67890", "title": "GXBank Expands Features"}) # similar thing as above
-    tx_bytes_1 = orjson.dumps(sample_transaction_event)
-    tx_bytes_2 = orjson.dumps({**sample_transaction_event, "transaction_id": "4fb96a75-6828-5673-c4ad-3d074f77bfb7", "amount_myr": 150.00})
+    review_bytes_1: bytes = orjson.dumps(sample_review_event)
+    review_bytes_2: bytes = orjson.dumps({**sample_review_event, "user_name": "Ahmad Dani", "rating": 4}) # event_id, user_name, and rating will replace the original values from unpacking sample_review_event
+    news_bytes_1: bytes = orjson.dumps(sample_news_event)
+    news_bytes_2: bytes = orjson.dumps({**sample_news_event, "article_uuid": "marketaux-uuid-67890", "title": "GXBank Expands Features"}) # similar thing as above
+    tx_bytes_1: bytes = orjson.dumps(sample_transaction_event)
+    tx_bytes_2: bytes = orjson.dumps({**sample_transaction_event, "transaction_id": "4fb96a75-6828-5673-c4ad-3d074f77bfb7", "amount_myr": 150.00})
 
     return [
         ConsumerRecord(
@@ -166,9 +168,9 @@ def sample_consumer_records(sample_review_event, sample_news_event, sample_trans
     ]
 
 @pytest.fixture
-def sample_malformed_consumer_records(sample_review_event):
+def sample_malformed_consumer_records(sample_review_event: dict[str, Any]) -> list[ConsumerRecord]:
     """synthetic list of ConsumerRecords with empty values and malformed JSON bytes for edge case testing"""
-    valid_bytes = orjson.dumps(sample_review_event)
+    valid_bytes: bytes = orjson.dumps(sample_review_event)
     return [
         ConsumerRecord(
             topic="app-reviews-events",
@@ -212,7 +214,7 @@ def sample_malformed_consumer_records(sample_review_event):
     ]
 
 @pytest.fixture
-def sample_parsed_events(sample_review_event, sample_news_event, sample_transaction_event):
+def sample_parsed_events(sample_review_event: dict[str, Any], sample_news_event: dict[str, Any], sample_transaction_event: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """synthetic dictionary of parsed event batches grouped by topic"""
     return {
         "app-reviews-events": [
@@ -230,14 +232,14 @@ def sample_parsed_events(sample_review_event, sample_news_event, sample_transact
     }
 
 @pytest.fixture
-def sample_unknown_topic_parsed_events(sample_review_event):
+def sample_unknown_topic_parsed_events(sample_review_event: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """synthetic dictionary containing an unrecognized topic name"""
     return {
         "unknown-unsupported-topic": [sample_review_event]
     }
 
 @pytest.fixture
-def sample_custom_persister_config():
+def sample_custom_persister_config() -> dict[str, int]:
     """synthetic custom connection pool size configuration"""
     return {
         "min_size": 3,
@@ -287,16 +289,16 @@ def news_dml_query():
 """
 
 @pytest.fixture
-def mock_async_pool():
+def mock_async_pool() -> tuple[MagicMock, MagicMock, MagicMock, AsyncMock]:
     '''synthetic mock AsyncConnectionPool with nested connection and cursor async context managers, as well as monkeypatch.setenv() to mock os.getenv()'''
-    mock_pool = MagicMock(spec=AsyncConnectionPool) # yea so AsyncConnectionPool itself is not asynchronous and so does its connection() method (we don't await when using them) so we use MagicMock, but that connection() method does return an object that uses async context manager protocol (aenter and aexit)
+    mock_pool: MagicMock = MagicMock(spec=AsyncConnectionPool) # yea so AsyncConnectionPool itself is not asynchronous and so does its connection() method (we don't await when using them) so we use MagicMock, but that connection() method does return an object that uses async context manager protocol (aenter and aexit)
     mock_pool.closed = False
     mock_pool.open = AsyncMock() # unlike above, all below (except connection and transaction) must be awaited so use AsyncMock
     mock_pool.close = AsyncMock()
 
-    mock_conn = MagicMock() # switched to MagicMock to stop "RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited" because the connection object itself is synchronous like above
-    mock_tx = MagicMock() # for verification transaction commit success or fail (rollbacK), maybe will be tested again during integration test
-    mock_cur = AsyncMock()
+    mock_conn: MagicMock = MagicMock() # switched to MagicMock to stop "RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited" because the connection object itself is synchronous like above
+    mock_tx: MagicMock = MagicMock() # for verification transaction commit success or fail (rollbacK), maybe will be tested again during integration test
+    mock_cur: AsyncMock = AsyncMock()
     mock_cur.executemany = AsyncMock()
 
     # setup cursor async context manager (async with conn.cursor() as cur)
@@ -321,15 +323,15 @@ def mock_async_pool():
     MANAGEMENT TEST
     tests PostgresPersister initialization with default and custom connection pool sizes (min_size and max_size)
 """
-def test_postgres_persister_init_default_and_custom(sample_custom_persister_config):
+def test_postgres_persister_init_default_and_custom(sample_custom_persister_config: dict[str, int]) -> None:
     # default init
-    default_persister = PostgresPersister()
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister.min_size == 1 # test default value being 1
     assert default_persister.max_size == 10 # ts 10
     assert default_persister._pool is None # and pool should have lazy initialization
 
     # custom init
-    custom_persister = PostgresPersister(**sample_custom_persister_config)
+    custom_persister: PostgresPersister = PostgresPersister(**sample_custom_persister_config)
     assert custom_persister.min_size == sample_custom_persister_config["min_size"]
     assert custom_persister.max_size == sample_custom_persister_config["max_size"]
     assert custom_persister._pool is None
@@ -343,10 +345,14 @@ def test_postgres_persister_init_default_and_custom(sample_custom_persister_conf
     tests PostgresPersister start and stop methods
 """
 @pytest.mark.anyio
-async def test_postgres_persister_start_and_stop(mock_async_pool) -> None:
-    default_persister = PostgresPersister()
+async def test_postgres_persister_start_and_stop(mock_async_pool: tuple[MagicMock, MagicMock, MagicMock, AsyncMock]) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
+    mock_pool: MagicMock # for multiple variable declarations in single line type hints, its like this, yeah
+    mock_conn: MagicMock
+    mock_tx: MagicMock
+    mock_cur: AsyncMock
     mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool # tuple unpacking baby
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
         # attempt to start postgres persister instance
@@ -364,10 +370,14 @@ async def test_postgres_persister_start_and_stop(mock_async_pool) -> None:
     test PostgresPersister async context manager
 """
 @pytest.mark.anyio
-async def test_postgres_persister_context_manager(mock_async_pool) -> None:
-    default_persister = PostgresPersister()
+async def test_postgres_persister_context_manager(mock_async_pool: tuple[MagicMock, MagicMock, MagicMock, AsyncMock]) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
+    mock_pool: MagicMock
+    mock_conn: MagicMock
+    mock_tx: MagicMock
+    mock_cur: AsyncMock
     mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
         async with default_persister as p:
@@ -387,7 +397,7 @@ async def test_postgres_persister_context_manager(mock_async_pool) -> None:
     tests PostgresPersister._create_conninfo() method for correctness in conn string formation
     string: postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}
 """
-def test_postgres_persister_create_conninfo(monkeypatch) -> None:
+def test_postgres_persister_create_conninfo(monkeypatch: pytest.MonkeyPatch) -> None:
     # with monkeypatch we can essentially "mock" the values of the environment variables so that we can test the _create_conninfo() method without having to set up the actual environment variables
     monkeypatch.setattr("apollo.database.service.POSTGRES_USER", "mockuser")
     monkeypatch.setattr("apollo.database.service.POSTGRES_PASSWORD", "mockpassword")
@@ -395,7 +405,7 @@ def test_postgres_persister_create_conninfo(monkeypatch) -> None:
     monkeypatch.setattr("apollo.database.service.POSTGRES_PORT", "0000")
     monkeypatch.setattr("apollo.database.service.POSTGRES_DB", "mockdb")
 
-    default_persister = PostgresPersister()
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
     # test _create_conninfo()
@@ -405,33 +415,33 @@ def test_postgres_persister_create_conninfo(monkeypatch) -> None:
     PARSING TEST
     tests PostgresPersister.parse_events() on sample_consumer_records
 """
-def test_postgres_persister_parse_events(sample_consumer_records, sample_parsed_events) -> None:
-    default_persister = PostgresPersister()
+def test_postgres_persister_parse_events(sample_consumer_records: list[ConsumerRecord], sample_parsed_events: dict[str, list[dict[str, Any]]]) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
-    result = default_persister.parse_events(sample_consumer_records)
+    result: dict[str, list[dict[str, Any]]] = default_persister.parse_events(sample_consumer_records)
     assert result == sample_parsed_events # they should be the same
 
 """
     PARSING TEST (ERROR HANDLING: MALFORMED DATA)
     tests PostgresPersister.parse_events() error handling on malformed ConsumerRecord
 """
-def test_postgres_persister_parse_events_malformed(sample_malformed_consumer_records):
-    default_persister = PostgresPersister()
+def test_postgres_persister_parse_events_malformed(sample_malformed_consumer_records: list[ConsumerRecord]) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
-    result = default_persister.parse_events(sample_malformed_consumer_records)
+    result: dict[str, list[dict[str, Any]]] = default_persister.parse_events(sample_malformed_consumer_records)
     assert len(result["app-reviews-events"]) == 1 # should only have 1 valid event, the other 2 malformed ones should be skipped
 
 """
     PARSING TEST (ERROR HANDLING: UNEXPECTED EXCEPTION)
     tests PostgresPersister.parse_events() error handling on unexpected exception, should just print the error and return empty dict
 """
-def test_postgres_persister_parse_events_exception(caplog) -> None:
-    default_persister = PostgresPersister()
+def test_postgres_persister_parse_events_exception(caplog: pytest.LogCaptureFixture) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
-    result = default_persister.parse_events(None) # 
+    result: dict[str, list[dict[str, Any]]] = default_persister.parse_events(None) # type: ignore # check marketaux.py for explanation regarding ts comment
     assert result == {} # from parse_events(), unexpected errors should return empty dict
     assert "(Apollo) Error while Postgres persister was parsing consumer records" in caplog.text
 
@@ -440,10 +450,14 @@ def test_postgres_persister_parse_events_exception(caplog) -> None:
     tests PostgresPersister.persist_events() on sample_parsed_events (ofc on a mock connection pool)
 """
 @pytest.mark.anyio
-async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_events) -> None:
-    default_persister = PostgresPersister()
+async def test_postgres_persister_persist_events(mock_async_pool: tuple[MagicMock, MagicMock, MagicMock, AsyncMock], sample_parsed_events: dict[str, list[dict[str, Any]]]) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
+    mock_pool: MagicMock
+    mock_conn: MagicMock
+    mock_tx: MagicMock
+    mock_cur: AsyncMock
     mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
 
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
@@ -451,7 +465,7 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
         mock_pool.open.assert_awaited_once()
         assert default_persister._pool is mock_pool # confirms patch did work
 
-        success = await default_persister.persist_events(sample_parsed_events) # run it
+        success: bool = await default_persister.persist_events(sample_parsed_events) # run it
         assert success is True # on successful insert should return True
 
         # checks the core persistence process stuff
@@ -459,10 +473,12 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
         mock_tx.__aenter__.assert_awaited_once()
         mock_tx.__aexit__.assert_awaited_once_with(None, None, None) # NOTE: context manager exits that were passed without arguments (those exc_type, exc_val, exc_tb stuff) means that the exit was clean with no exception, we use this to check for successful transaction
 
-        calls = mock_cur.executemany.await_args_list # from executemany we will get the list of all calls (awaits in this async case) and their specific arguments
+        calls: list[Any] = mock_cur.executemany.await_args_list # from executemany we will get the list of all calls (awaits in this async case) and their specific arguments
         assert len(calls) == 3 # there should be 3 calls, one for reviews, one for news, and one for transactions
 
         # checking the first call (which is reviews)
+        review_sql: str
+        review_records: list[dict[str, Any]]
         review_sql, review_records = calls[0].args
         assert "INSERT INTO staging_reviews" in review_sql # check if the sql insertion query is proper
         assert "ON CONFLICT (event_id)" in review_sql
@@ -470,6 +486,8 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
         assert review_records == sample_parsed_events["app-reviews-events"] # check if the records are correct
 
         # checking the second call (which is news)
+        news_sql: str
+        news_records: list[dict[str, Any]]
         news_sql, news_records = calls[1].args
         assert "INSERT INTO staging_marketaux" in news_sql # check if the sql insertion query is proper
         assert "ON CONFLICT (event_id)" in news_sql
@@ -477,6 +495,8 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
         assert news_records == sample_parsed_events["market-news-events"] # check if the records are correct
 
         # checking the third call (which is transactions)
+        tx_sql: str
+        tx_records: list[dict[str, Any]]
         tx_sql, tx_records = calls[2].args
         assert "INSERT INTO staging_transactions" in tx_sql # check if the sql insertion query is proper
         assert "ON CONFLICT (transaction_id)" in tx_sql
@@ -492,10 +512,14 @@ async def test_postgres_persister_persist_events(mock_async_pool, sample_parsed_
     tests PostgresPersister.persist_events() error handling on malformed parsing that has unknown topic (sample_unknown_topic_parsed_events)
 """
 @pytest.mark.anyio
-async def test_postgres_persister_persist_events_unknown_topic(mock_async_pool, sample_unknown_topic_parsed_events, caplog) -> None:
-    default_persister = PostgresPersister()
+async def test_postgres_persister_persist_events_unknown_topic(mock_async_pool: tuple[MagicMock, MagicMock, MagicMock, AsyncMock], sample_unknown_topic_parsed_events: dict[str, list[dict[str, Any]]], caplog: pytest.LogCaptureFixture) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
+    mock_pool: MagicMock
+    mock_conn: MagicMock
+    mock_tx: MagicMock
+    mock_cur: AsyncMock
     mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
 
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
@@ -503,7 +527,7 @@ async def test_postgres_persister_persist_events_unknown_topic(mock_async_pool, 
         mock_pool.open.assert_awaited_once()
         assert default_persister._pool is mock_pool # confirms patch did work
 
-        success = await default_persister.persist_events(sample_unknown_topic_parsed_events) # run it
+        success: bool = await default_persister.persist_events(sample_unknown_topic_parsed_events) # run it
         assert success is True # in the actual method, unknown topics are skipped and only logs a warning, still counts as successful
 
         mock_conn.transaction.assert_called_once()
@@ -521,10 +545,14 @@ async def test_postgres_persister_persist_events_unknown_topic(mock_async_pool, 
     NOTE: this does not test for transactional failure itself, just unexpected exception arising during the persisting process
 """
 @pytest.mark.anyio
-async def test_postgres_persister_persist_events_unexpected_exception(mock_async_pool, sample_parsed_events, caplog) -> None:
-    default_persister = PostgresPersister()
+async def test_postgres_persister_persist_events_unexpected_exception(mock_async_pool: tuple[MagicMock, MagicMock, MagicMock, AsyncMock], sample_parsed_events: dict[str, list[dict[str, Any]]], caplog: pytest.LogCaptureFixture) -> None:
+    default_persister: PostgresPersister = PostgresPersister()
     assert default_persister._pool is None
 
+    mock_pool: MagicMock
+    mock_conn: MagicMock
+    mock_tx: MagicMock
+    mock_cur: AsyncMock
     mock_pool, mock_conn, mock_tx, mock_cur = mock_async_pool
 
     with patch("apollo.database.service.AsyncConnectionPool", return_value=mock_pool):
@@ -536,12 +564,15 @@ async def test_postgres_persister_persist_events_unexpected_exception(mock_async
         mock_cur.executemany.side_effect = Exception("executemany error stuff")
 
         # run it
-        success = await default_persister.persist_events(sample_parsed_events)
+        success: bool = await default_persister.persist_events(sample_parsed_events)
         assert success is False # on failed insert should return False
 
         mock_conn.transaction.assert_called_once()
         mock_tx.__aenter__.assert_awaited_once()
         # ----- witchcraft
+        exc_type: type[BaseException]
+        exc_val: BaseException
+        exc_tb: Any
         exc_type, exc_val, exc_tb = mock_tx.__aexit__.await_args.args # unpacking the arguments received by aexit
         assert exc_type is Exception # confirm that it is an exception type
         assert "executemany error stuff" in str(exc_val) # confirm the exception value is correct after conversion to string

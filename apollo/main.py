@@ -3,6 +3,7 @@
 		v1.0 - completed end-to-end async orchestration, polymorphic scraper execution, OCP (partition_key, event_dict) tuple streaming to ApolloKafkaProducer achieving full SoC, and centralized logging configuration
 		v1.1 - standardized logging identifiers for main orchestrator and signal handling clarity
 		v1.2 - integrated TransactionGenerator to generate and stream synthetic Malaysian banking transactions to Kafka topic 'myr-transactions' partitioned by user_id
+		v1.3 - added variable type hints across orchestrator pipeline
 """
 
 import logging
@@ -12,6 +13,7 @@ import itertools # just for flattening the results list
 from dotenv import load_dotenv
 from typing import Sequence
 from asyncio import CancelledError
+from typing import Any
 
 from apollo.scrapers.play_store import PlayStoreScraper
 from apollo.scrapers.marketaux import MarketauxScraper
@@ -20,7 +22,7 @@ from apollo.scrapers.base import BaseScraper
 from apollo.schemas import ReviewPayload, FinancialNewsPayload, TransactionPayload
 from apollo.kafka.producer import ApolloKafkaProducer
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 load_dotenv()
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -38,7 +40,7 @@ async def main() -> None:
                         "com.maybank2u.life": "MAE by Maybank2u",
                         "my.com.myboost": "Boost"
                         }
-        marketaux_params: dict[str, str] = {
+        marketaux_params: dict[str, Any] = {
             "api_token": os.getenv("MARKETAUX_TOKEN"),
             "limit": 3,
             "language": "en",
@@ -46,7 +48,7 @@ async def main() -> None:
         }
         marketaux_targets: list[str] = ["Maybank", "Boost Bank", "GXBank Malaysia", "TNG eWallet"]
         count: int = 1
-        events: dict[str, list[tuple[str | None, dict]]] = {
+        events: dict[str, list[tuple[str | None, dict[str, Any]]]] = {
             "app-reviews-events": [],
             "market-news-events": [],
             "myr-transactions": []
@@ -56,10 +58,10 @@ async def main() -> None:
             PlayStoreScraper(app_dict=playstore_app_dict),
             MarketauxScraper(params=marketaux_params, search_targets=marketaux_targets)
         ]
-        results = await asyncio.gather(*[scraper.run(count=count) for scraper in scrapers], return_exceptions=True) # polymorphically run the run() method for each scraper in the sequence, allowing exceptions will ensure one exception will not cause every other scrape to fail and stop, maximizes throughput and exceptions will be handled later
+        results: list[Any] = await asyncio.gather(*[scraper.run(count=count) for scraper in scrapers], return_exceptions=True) # polymorphically run the run() method for each scraper in the sequence, allowing exceptions will ensure one exception will not cause every other scrape to fail and stop, maximizes throughput and exceptions will be handled later
 
         for scraper_output in results: # check if any scraper fails, continuation of asyncio.gather()'s return_exceptions=True explanation above
-            if isinstance(scraper_output, Exception): # if that scraper failed, log it as a warning and skip processing it
+            if isinstance(scraper_output, BaseException): # if that scraper failed, log it as a warning and skip processing it
                 logger.warning(f"(Apollo) main orchestrator, a scraper failed to scrape: {scraper_output}")
                 continue
             # otherwise process the scraped data
@@ -78,7 +80,7 @@ async def main() -> None:
             events["myr-transactions"].append((str(tx.user_id), tx.model_dump(mode="json"))) # here we use user_id as partition key to ensure same user's transactions are sent to same partition, good for data locality and stuff
         
         async with ApolloKafkaProducer() as producer:
-            producer_results = await producer.run(events, return_results=True)
+            producer_results: dict[str, int] | None = await producer.run(events, return_results=True)
         
         logger.info(f"(Apollo) Successfully processed play store reviews, marketaux news, and synthetic transactions, and sent all data to Kafka, entire operation was successful:\n {producer_results}")
 

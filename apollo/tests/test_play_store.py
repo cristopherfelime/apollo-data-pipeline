@@ -1,6 +1,7 @@
 """
     unit testing script for apollo PlayStoreScraper in play_store.py
     v1.0 - unit tests for dictionary management, raw review processing, mocked network fetching, and end-to-end run aggregation
+    v1.1 - added variable type hints across test cases and fixtures
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -8,6 +9,7 @@ import pytest
 from unittest.mock import patch
 from datetime import datetime, timezone
 from uuid import UUID
+from typing import Any
 
 from apollo.scrapers.play_store import PlayStoreScraper
 from apollo.schemas import ReviewPayload
@@ -18,11 +20,11 @@ from apollo.schemas import ReviewPayload
 # reusable synthetic review dictionaries that can be passed onto test functions as arguments
 
 @pytest.fixture
-def anyio_backend():
+def anyio_backend() -> str:
     return "asyncio" # in apollo we only use asyncio event loop for concurrency, not trio
 
 @pytest.fixture
-def sample_raw_review():
+def sample_raw_review() -> dict[str, Any]:
     """synthetic raw review dictionary as returned by google_play_scraper library with realistic extra fields"""
     return {
         "reviewId": "gp:AOqpTOE_example_review_id_12345",
@@ -39,7 +41,7 @@ def sample_raw_review():
     }
 
 @pytest.fixture
-def sample_invalid_raw_review():
+def sample_invalid_raw_review() -> dict[str, Any]:
     """synthetic invalid review with out-of-bound score and empty content matching google_play_scraper structure"""
     return {
         "reviewId": "gp:AOqpTOE_invalid_review_id",
@@ -66,14 +68,14 @@ def sample_invalid_raw_review():
 """
 def test_play_store_init_default_and_custom() -> None:
     # default initialization
-    default_scraper = PlayStoreScraper()
+    default_scraper: PlayStoreScraper = PlayStoreScraper()
     assert "my.com.gxbank.app" in default_scraper.get_app_dict() # to see if the default app_id is in the app_dict
     assert default_scraper.get_app_dict()["my.com.gxbank.app"] == "GX Bank" # to see if the default app_name is in the app_dict
     assert len(default_scraper.get_app_dict()) == 4 # to see if default 4 apps are initialized and can be accessed
 
     # custom initialization
-    custom_dict = {"com.custom.app": "Custom App"} # custom apps dictionary containing target apps and their corresponding app names
-    custom_scraper = PlayStoreScraper(app_dict=custom_dict) # initializing scraper with custom apps dictionary
+    custom_dict: dict[str, str] = {"com.custom.app": "Custom App"} # custom apps dictionary containing target apps and their corresponding app names
+    custom_scraper: PlayStoreScraper = PlayStoreScraper(app_dict=custom_dict) # initializing scraper with custom apps dictionary
     assert custom_scraper.get_app_dict() == custom_dict # to see if the custom apps dictionary is correctly initialized and can be accessed
 
 """
@@ -81,7 +83,7 @@ def test_play_store_init_default_and_custom() -> None:
     tests PlayStoreScraper add_app_dict, get_app_dict, and remove_app methods
 """
 def test_play_store_app_dict_crud() -> None:
-    scraper = PlayStoreScraper(app_dict={}) # initializing scraper with empty apps dictionary
+    scraper: PlayStoreScraper = PlayStoreScraper(app_dict={}) # initializing scraper with empty apps dictionary
     assert scraper.get_app_dict() == {} # to see if the apps dictionary is empty
 
     # add app
@@ -102,14 +104,14 @@ def test_play_store_app_dict_crud() -> None:
     verifies target app_name and app_id mapping and Pydantic validation
 """
 @pytest.mark.anyio # IMPORTANT: pytest needs this to run async tests on async methods
-async def test_play_store_process_valid_reviews(sample_raw_review) -> None:
-    scraper = PlayStoreScraper()
-    raw_payload = [sample_raw_review]
-    target_app = "my.com.gxbank.app"
+async def test_play_store_process_valid_reviews(sample_raw_review: dict[str, Any]) -> None:
+    scraper: PlayStoreScraper = PlayStoreScraper()
+    raw_payload: list[dict[str, Any]] = [sample_raw_review]
+    target_app: str = "my.com.gxbank.app"
 
-    processed = await scraper.process(raw_payload, target=target_app)
+    processed: list[ReviewPayload] = await scraper.process(raw_payload, target=target_app)
     assert len(processed) == 1 # to see if only 1 review is processed and returned (as expected from input)
-    review = processed[0] # process() intended to return list of ReviewPayload objects, so this is needed
+    review: ReviewPayload = processed[0] # process() intended to return list of ReviewPayload objects, so this is needed
 
     assert isinstance(review, ReviewPayload) # to see if the returned object is an instance of ReviewPayload class
     assert review.app_id == "my.com.gxbank.app" # to see if the app_id is correctly mapped from the raw review dict
@@ -126,13 +128,13 @@ async def test_play_store_process_valid_reviews(sample_raw_review) -> None:
     verifies default to Unknown App and com.unknown
 """
 @pytest.mark.anyio
-async def test_play_store_process_unknown_target_fallback(sample_raw_review) -> None:
-    scraper = PlayStoreScraper()
-    raw_payload = [sample_raw_review]
+async def test_play_store_process_unknown_target_fallback(sample_raw_review: dict[str, Any]) -> None:
+    scraper: PlayStoreScraper = PlayStoreScraper()
+    raw_payload: list[dict[str, Any]] = [sample_raw_review]
 
-    processed = await scraper.process(raw_payload, target="com.unregistered.app") # test on unregistered app
+    processed: list[ReviewPayload] = await scraper.process(raw_payload, target="com.unregistered.app") # test on unregistered app
     assert len(processed) == 1 # to see if only 1 review is processed and returned (as expected from input)
-    review = processed[0]
+    review: ReviewPayload = processed[0]
 
     assert review.app_name == "Unknown App" # to see if the app_name is fallback to "Unknown App"
     assert review.app_id == "com.unknown" # to see if the app_id is fallback to "com.unknown"
@@ -143,13 +145,13 @@ async def test_play_store_process_unknown_target_fallback(sample_raw_review) -> 
     verifies that only fields required by ReviewPayload are extracted, extra fields are filtered out
 """
 @pytest.mark.anyio
-async def test_play_store_process_filters_extra_fields(sample_raw_review) -> None:
-    scraper = PlayStoreScraper()
-    raw_payload = [sample_raw_review]
-    target_app = "my.com.gxbank.app"
+async def test_play_store_process_filters_extra_fields(sample_raw_review: dict[str, Any]) -> None:
+    scraper: PlayStoreScraper = PlayStoreScraper()
+    raw_payload: list[dict[str, Any]] = [sample_raw_review]
+    target_app: str = "my.com.gxbank.app"
 
-    processed = await scraper.process(raw_payload, target=target_app)
-    review = processed[0]
+    processed: list[ReviewPayload] = await scraper.process(raw_payload, target=target_app)
+    review: ReviewPayload = processed[0]
 
     # check if extra fields are filtered out
     assert "reviewId" not in review.model_dump()
@@ -174,8 +176,8 @@ async def test_play_store_process_filters_extra_fields(sample_raw_review) -> Non
 """
 @pytest.mark.anyio
 async def test_play_store_process_html_sanitization() -> None:
-    scraper = PlayStoreScraper()
-    raw_review_with_html = {
+    scraper: PlayStoreScraper = PlayStoreScraper()
+    raw_review_with_html: dict[str, Any] = {
         "reviewId": "gp:AOqpTOE_html_test",
         "userName": "Hafizah",
         "userImage": "https://play-lh.googleusercontent.com/avatar",
@@ -186,11 +188,11 @@ async def test_play_store_process_html_sanitization() -> None:
         "at": datetime(2026, 8, 12, 9, 15, 0),
         "appVersion": "2.0.1"
     }
-    target_app = "my.com.gxbank.app"
+    target_app: str = "my.com.gxbank.app"
 
-    processed = await scraper.process([raw_review_with_html], target=target_app)
+    processed: list[ReviewPayload] = await scraper.process([raw_review_with_html], target=target_app)
     assert len(processed) == 1 # to see if only 1 review is processed and returned (as expected from input)
-    review = processed[0]
+    review: ReviewPayload = processed[0]
 
     assert review.review_text == "Fast application approval! Super easy reliable." # verifies that <b>, <br>, and &amp; were sanitized and extra whitespaces removed
 
@@ -200,12 +202,12 @@ async def test_play_store_process_html_sanitization() -> None:
     verifies that malformed reviews are skipped without terminating the batch
 """
 @pytest.mark.anyio
-async def test_play_store_process_skips_invalid_reviews(sample_raw_review, sample_invalid_raw_review) -> None:
-    scraper = PlayStoreScraper()
-    raw_payload = [sample_raw_review, sample_invalid_raw_review]
-    target_app = "com.maybank2u.life"
+async def test_play_store_process_skips_invalid_reviews(sample_raw_review: dict[str, Any], sample_invalid_raw_review: dict[str, Any]) -> None:
+    scraper: PlayStoreScraper = PlayStoreScraper()
+    raw_payload: list[dict[str, Any]] = [sample_raw_review, sample_invalid_raw_review]
+    target_app: str = "com.maybank2u.life"
 
-    processed = await scraper.process(raw_payload, target=target_app) # test on invalid input data (out-of-bound rating and empty content)
+    processed: list[ReviewPayload] = await scraper.process(raw_payload, target=target_app) # test on invalid input data (out-of-bound rating and empty content)
     # only the valid review should be processed, invalid one skipped
     assert len(processed) == 1 # to see if only 1 review is processed and returned (invalid one skipped)
     assert processed[0].user_name == "Farhan Azmi" # to see if the user_name is correctly mapped from the raw review dict
@@ -220,13 +222,13 @@ async def test_play_store_process_skips_invalid_reviews(sample_raw_review, sampl
     and asynchronous execution ig
 """
 @pytest.mark.anyio
-async def test_play_store_fetch_single_target(sample_raw_review) -> None:
-    scraper = PlayStoreScraper()
-    mock_reviews_return = ([sample_raw_review], "continuation_token_123") # what google_play_scraper.reviews() is expected to return (list of results, continuation_token)
+async def test_play_store_fetch_single_target(sample_raw_review: dict[str, Any]) -> None:
+    scraper: PlayStoreScraper = PlayStoreScraper()
+    mock_reviews_return: tuple[list[dict[str, Any]], str] = ([sample_raw_review], "continuation_token_123") # what google_play_scraper.reviews() is expected to return (list of results, continuation_token)
 
     # unittest.mock.patch() is used to mock the google_play_scraper.reviews() function to prevent actual api calls and speed up tests
     with patch("apollo.scrapers.play_store.reviews", return_value=mock_reviews_return) as mock_reviews: # in this with statement, we are mocking google_play_scraper.reviews() to return mock_reviews_return above
-        result = await scraper.fetch(target="my.com.gxbank.app", count=1) # fetch reviews for a single target app
+        result: list[dict] | list[list[dict]] = await scraper.fetch(target="my.com.gxbank.app", count=1) # fetch reviews for a single target app
         mock_reviews.assert_called_once_with( # internal inspection where we check if the mocked function was called with the correct arguments
             "my.com.gxbank.app", # to see if the app_id is correctly passed to the mocked reviews function
             count=1, # to see if the count is correctly passed to the mocked reviews function
@@ -241,13 +243,13 @@ async def test_play_store_fetch_single_target(sample_raw_review) -> None:
     and
 """
 @pytest.mark.anyio
-async def test_play_store_fetch_multiple_targets(sample_raw_review) -> None:
-    scraper = PlayStoreScraper()
-    mock_reviews_return = ([sample_raw_review], "continuation_token_123")
-    target_apps = ["my.com.gxbank.app", "com.maybank2u.life"] # 2 apps, for 2 tasks in asyncio.gather(), both are expected to return in format of ([sample_raw_review], "continuation_token_123") from above down below
+async def test_play_store_fetch_multiple_targets(sample_raw_review: dict[str, Any]) -> None:
+    scraper: PlayStoreScraper = PlayStoreScraper()
+    mock_reviews_return: tuple[list[dict[str, Any]], str] = ([sample_raw_review], "continuation_token_123")
+    target_apps: list[str] = ["my.com.gxbank.app", "com.maybank2u.life"] # 2 apps, for 2 tasks in asyncio.gather(), both are expected to return in format of ([sample_raw_review], "continuation_token_123") from above down below
 
     with patch("apollo.scrapers.play_store.reviews", return_value=mock_reviews_return) as mock_reviews:
-        result = await scraper.fetch(target=target_apps, count=1)
+        result: list[dict] | list[list[dict]] = await scraper.fetch(target=target_apps, count=1)
         assert mock_reviews.call_count == 2 # call_count is used to see if the mocked function (that reviews() method) was called twice
         assert len(result) == 2 # to see if the result is a list of two items (one for each target app), asyncio.gather() should be used and it returns the results of all the tasks as a list in the order they were given
         assert result[0] == [sample_raw_review] # to see if the first item is the expected result (which is gxbank's raw review data)
@@ -259,10 +261,10 @@ async def test_play_store_fetch_multiple_targets(sample_raw_review) -> None:
 """
 @pytest.mark.anyio
 async def test_play_store_fetch_exception_handling() -> None:
-    scraper = PlayStoreScraper()
+    scraper: PlayStoreScraper = PlayStoreScraper()
 
     with patch("apollo.scrapers.play_store.reviews", side_effect=Exception("Connection timed out")): # side_effect is used to mock the function to raise an exception instead of returning a value like above
-        result = await scraper.fetch(target="my.com.gxbank.app", count=1)
+        result: list[dict] | list[list[dict]] = await scraper.fetch(target="my.com.gxbank.app", count=1)
         assert result == [] # to see if the result is an empty list (as fetch() is expected to catch the exception and return an empty list)
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -275,16 +277,16 @@ async def test_play_store_fetch_exception_handling() -> None:
     verifies multi-app concurrent execution, result flattening, and ReviewPayload return list
 """
 @pytest.mark.anyio
-async def test_play_store_run_success(sample_raw_review) -> None:
-    custom_apps = {
+async def test_play_store_run_success(sample_raw_review: dict[str, Any]) -> None:
+    custom_apps: dict[str, str] = {
         "my.com.gxbank.app": "GX Bank",
         "com.maybank2u.life": "MAE"
     } # custom apps dictionary containing target apps and their corresponding app names (well theyre 2 apps from out default dict but whatever)
-    scraper = PlayStoreScraper(app_dict=custom_apps)
-    mock_fetch_output = [[sample_raw_review], [sample_raw_review]] # what we expect fetch() to return (list of lists of raw reviews)
+    scraper: PlayStoreScraper = PlayStoreScraper(app_dict=custom_apps)
+    mock_fetch_output: list[list[dict[str, Any]]] = [[sample_raw_review], [sample_raw_review]] # what we expect fetch() to return (list of lists of raw reviews)
 
     with patch.object(scraper, "fetch", return_value=mock_fetch_output): # patch.object is used to mock the fetch() method of the scraper object
-        results = await scraper.run(count=1)
+        results: list[ReviewPayload] = await scraper.run(count=1)
         assert len(results) == 2 # to see if the result is a list of two items (one for each target app)
         assert all(isinstance(r, ReviewPayload) for r in results) # to see if all items in the result are ReviewPayload instances
         assert results[0].app_name == "GX Bank" # to see if my.com.gxbank.app's app_name is GX Bank
@@ -296,10 +298,10 @@ async def test_play_store_run_success(sample_raw_review) -> None:
 """
 @pytest.mark.anyio
 async def test_play_store_run_unexpected_error() -> None:
-    scraper = PlayStoreScraper()
+    scraper: PlayStoreScraper = PlayStoreScraper()
 
     with patch.object(scraper, "fetch", side_effect=Exception("Fatal pipeline crash")): # to mock the fetch() method to raise an exception instead of returning a value like above
-        results = await scraper.run(count=1)
+        results: list[ReviewPayload] = await scraper.run(count=1)
         assert results == [] # to see if the result is an empty list (as run() is expected to catch the exception and return an empty list)
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 """
 		marketaux api scraper
 		v1.2.3 - refactored a bit of process(), it explicitly maps fields into FinancialNewsPayload to safely filter all raw API extra fields as 'extra' attribute is now fixed in its respective schema
+		v1.3 - added variable type hints across scraper methods
 """
 
 import logging # logging purposes
@@ -11,12 +12,13 @@ import itertools # for flattening nested list results from concurrent async requ
 from asyncio import CancelledError # to catch cancelled error (like KeyboardInterrupt)
 from dotenv import load_dotenv # for loading environment variables from .env file
 from pydantic import ValidationError # to handle validation error from pydantic models
+from typing import Any
 
 from apollo.schemas import FinancialNewsPayload # to validate data
 from apollo.scrapers.base import BaseScraper # to inherit the abstract class
 
 # initialize logger
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 # loading .env file and assigning marketaux token as global variable to be used
 load_dotenv()
@@ -48,11 +50,11 @@ load_dotenv()
 # inherits BaseScraper: abstract attribute required -> data (list[BaseModel])
 class MarketauxScraper(BaseScraper):
 	endpoint: str = "https://api.marketaux.com/v1/news/all"
-	params: dict[str, str]
+	params: dict[str, Any]
 	search_targets: list[str]
-	client: httpx.AsyncClient
+	client: httpx.AsyncClient | None
 
-	def __init__(self, params: dict[str, str] | None=None, search_targets: list[str] | None=None) -> None:
+	def __init__(self, params: dict[str, Any] | None=None, search_targets: list[str] | None=None) -> None:
 		self.client = None
 		if params:
 			self.params = params
@@ -77,7 +79,7 @@ class MarketauxScraper(BaseScraper):
 		arguments: self, params (dictionary of string:string to be added as parameters)
 		EXPECTED TO return: None
 	"""
-	def add_params(self, params: dict[str, str]) -> None:
+	def add_params(self, params: dict[str, Any]) -> None:
 		self.params.update(params)
 
 	"""
@@ -148,8 +150,8 @@ class MarketauxScraper(BaseScraper):
 	# the error i was talking about:
 	# TypeError: fetch() missing 1 required positional argument: 'target'
 	# son
-	async def fetch(self, target: str | list[str] | None=None, params: dict[str, str] | None=None, count: int=1) -> list[httpx.Response | Exception] | list[list[httpx.Response | Exception]]:
-		responses = []
+	async def fetch(self, target: str | list[str] | None=None, params: dict[str, Any] | None=None, count: int=1) -> list[httpx.Response | BaseException]: # type: ignore # "type: ignore" basically to tell linter to shut up and ignore the type error because it cant properly detect that target is NOT missing
+		responses: list[httpx.Response | BaseException] = []
 		# cant use self for default argument values because they're evaluated during module import, can raise AttributeError
 		# should work now
 		target = target or self.endpoint # or keyword: if target is None then use self.endpoint, useful when trying to use instance attributes as defaults
@@ -157,6 +159,7 @@ class MarketauxScraper(BaseScraper):
 		try:
 			if self.client is None: # ensure httpx client is initialized before making requests
 				await self.start_client()
+			assert self.client is not None # check service.py for explanation of assert
 			if isinstance(target, str): # for singular target
 				tasks_fetch = [
 					self.client.get(
@@ -195,24 +198,24 @@ class MarketauxScraper(BaseScraper):
 		EXPECTED TO return: list of FinancialNewsPayload objects
 	"""
 	# TODO: the triple nested try-except lowk getting ridiculous i might need to separate each processing level into their own method
-	async def process(self, payload: list[httpx.Response | Exception]) -> list[FinancialNewsPayload]:
-		processed_news = []
+	async def process(self, payload: list[httpx.Response | BaseException]) -> list[FinancialNewsPayload]: # type: ignore
+		processed_news: list[FinancialNewsPayload] = []
 		try:
 			for news_batch in payload:
-				if isinstance(news_batch, Exception): # if guard to catch any asyncio.gather() related exceptions like httpx timeouts
+				if isinstance(news_batch, BaseException): # if guard to catch any asyncio.gather() related exceptions like httpx timeouts
 					logger.error(f"(Apollo) MarketauxScraper.process(): Network exception occurred from asyncio.gather(), most likely due to timeouts")
 					continue
 				try:
 					news_batch.raise_for_status() # this is a continuation from fetch() explanation above, if the response has an error status code, raise httpx.HTTPStatusError so that it is caught below
-					news_dict = news_batch.json() # essentially parses the json httpx.Response objects to python dict
+					news_dict: dict[str, Any] = news_batch.json() # essentially parses the json httpx.Response objects to python dict
 					for news_item in news_dict.get("data", []): # iterating through the list of news items (need to subset to data field since there are other field in the json response (meta))
 						try: # prev ver accidentally put try-except outside of the for loop, this should properly handle individual news item level exception now
-							entities = news_item.get("entities") # to check if entities key exists
-							sentiment_score = None
+							entities: Any = news_item.get("entities") # to check if entities key exists
+							sentiment_score: float | None = None
 							if entities and isinstance(entities, list) and (len(entities) > 0): # if guard for entities, checks if its not None, is a list, and has content
 								sentiment_score = entities[0].get("sentiment_score") # sentiment_score is located in the entities key of each data
 							
-							extracted_news = { # explicitly extract only the fields required by FinancialNewsPayload to avoid extra_forbidden ValidationError from raw API fields (like keywords, image_url, description) the one i fixed earlier
+							extracted_news: dict[str, Any] = { # explicitly extract only the fields required by FinancialNewsPayload to avoid extra_forbidden ValidationError from raw API fields (like keywords, image_url, description) the one i fixed earlier
 								"uuid": news_item.get("uuid"),
 								"title": news_item.get("title"),
 								"snippet": news_item.get("snippet") or news_item.get("description", ""), # description works as a snippet too lowk, good as a backup before resorting to empty string
@@ -221,7 +224,7 @@ class MarketauxScraper(BaseScraper):
 								"sentiment_score": sentiment_score,
 								"published_at": news_item.get("published_at")
 							}
-							validated_news = FinancialNewsPayload.model_validate(extracted_news) # any ValidationError will be caught below
+							validated_news: FinancialNewsPayload = FinancialNewsPayload.model_validate(extracted_news) # any ValidationError will be caught below
 							processed_news.append(validated_news)
 						# this is individual news item level
 						except ValidationError as e:
@@ -250,7 +253,7 @@ class MarketauxScraper(BaseScraper):
 		arguments: self
 		EXPECTED TO return: the context manager instance (self)
 	"""
-	async def __aenter__(self):
+	async def __aenter__(self) -> "MarketauxScraper":
 		await self.start_client()
 		return self
 	
@@ -259,7 +262,7 @@ class MarketauxScraper(BaseScraper):
 		arguments: self, exc_type (exception type, None if no exception), exc_val (exception value, None if no exception), exc_tb (traceback object, None if no exception)
 		EXPECTED TO return: None
 	"""
-	async def __aexit__(self, exc_type, exc_val, exc_tb):
+	async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
 		await self.close_client()
 
 	"""
@@ -268,23 +271,23 @@ class MarketauxScraper(BaseScraper):
 		arguments: self, count (integer number of requests per keyword, default is 1), search_targets (list of search target strings like ['Maybank', 'Boost']), params (optional query parameters dictionary)
 		EXPECTED TO return: list of FinancialNewsPayload
 	"""
-	async def run(self, count: int=3, search_targets: list[str] | None=None, params: dict[str, str] | None=None) -> list[FinancialNewsPayload]:
+	async def run(self, count: int=3, search_targets: list[str] | None=None, params: dict[str, Any] | None=None) -> list[FinancialNewsPayload]: # type: ignore
 		try:
-			opened_locally = self.client is None # using async with statement, the context manager client will be initialized (from __aenter__()), so this flag will only evaluate to true if run() is executed standalone without with statement
+			opened_locally: bool = self.client is None # using async with statement, the context manager client will be initialized (from __aenter__()), so this flag will only evaluate to true if run() is executed standalone without with statement
 			try:
 				if opened_locally: # since standalone (local) run() don't automatically call __aenter__() unlike using with statement, this if guard ensures that the client is initialized
 					await self.start_client()
 
 				search_targets = [*(self.search_targets if search_targets is None else search_targets)] # unpacks instance search_targets if the provided argument is None, else unpacks that argument instead
-				request_params = {**(self.params if params is None else params)} # same as above but dictionary comprehension for params
+				request_params: dict[str, Any] = {**(self.params if params is None else params)} # same as above but dictionary comprehension for params
 
-				tasks_fetch = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
+				tasks_fetch: list[Any] = [ # create a fetch task now for each search target keyword (one for Maybank, one for GX Bank, etc)
 					self.fetch(target=self.endpoint, params={**request_params, "search": target}, count=count)
 					for target in search_targets
 				]
-				fetch_results_nested = await asyncio.gather(*tasks_fetch) # gather all fetch tasks to run concurrently
-				fetch_results = list(itertools.chain.from_iterable(fetch_results_nested)) # and flatten the nested list of responses from each search target
-				processed_results = await self.process(fetch_results) # process and validate all the results
+				fetch_results_nested: list[list[httpx.Response | BaseException]] = await asyncio.gather(*tasks_fetch) # gather all fetch tasks to run concurrently
+				fetch_results: list[httpx.Response | BaseException] = list(itertools.chain.from_iterable(fetch_results_nested)) # and flatten the nested list of responses from each search target
+				processed_results: list[FinancialNewsPayload] = await self.process(fetch_results) # process and validate all the results
 
 				return processed_results
 

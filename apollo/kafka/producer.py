@@ -3,19 +3,21 @@
 		v1.2.1 - added import asyncio to fix missing import in run()...
         v1.2.1.1 - start() now checks if _producer is an instance of AIOKafkaProducer or not
         v1.3 - kafka partition key can be None apparently, and i found out that there's no such thing as DLQ at partition level (in fact, it can even create a 'hot-spotting' in a specific key due to how its hashing partitioner works), so i moved them to topic level by making a new DLQ topic for each
+        v1.4 - added variable type hints across producer pipeline and methods
 """
 
 import logging
 import os
 import orjson # super fast rust written replacement for json
 import asyncio # like how did i miss this
+from typing import Any
 from dotenv import load_dotenv
 from aiokafka import AIOKafkaProducer # already imports asyncio in under the hood
 from aiokafka.errors import KafkaError
 from aiokafka.structs import RecordMetadata
 from asyncio import CancelledError
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 load_dotenv()
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -67,16 +69,26 @@ class ApolloKafkaProducer:
         EXPECTED TO return: None
     """
     async def start(self) -> None:
-        if self._producer is None: # checks if the producer is not initialized
-            try: # attempt to initialize the producer instance and start them
-                self.initialize()
-                await self._producer.start()
-                logger.info(f"(Apollo) Kafka Producer started successfully with bootstrap servers: {self.bootstrap_servers}")
-            except Exception as e:
-                logger.error(f"(Apollo) Error while starting Kafka Producer: {e}")
-                self._producer = None # if error, set producer back to None to allow retries
-        else:
-            logger.info(f"(Apollo) Kafka Producer already running!")
+        try:
+            if self._producer is None: # checks if the producer is not initialized
+                try: # attempt to initialize the producer instance and start them
+                    self.initialize()
+                    assert self._producer is not None # check service.py for explanation of assert
+                    await self._producer.start()
+                    logger.info(f"(Apollo) Kafka Producer started successfully with bootstrap servers: {self.bootstrap_servers}")
+                except Exception as e:
+                    logger.error(f"(Apollo) Error while starting Kafka Producer: {e}")
+                    self._producer = None # if error, set producer back to None to allow retries
+            else:
+                logger.info(f"(Apollo) Kafka Producer already running!")
+        except CancelledError:
+            logger.info(f"(Apollo) Attempted to start Kafka Producer, but then was cancelled by the user (KeyboardInterrupt)")
+            raise
+        except Exception as e:
+            logger.error(f"(Apollo) Error while starting Kafka Producer: {e}")
+            if self._producer is not None:
+                await self._producer.stop()
+                self._producer = None
     
     """
         stops kafka producer instance
@@ -99,7 +111,7 @@ class ApolloKafkaProducer:
         arguments: self
         EXPECTED TO return: the context manager instance (self)
     """
-    async def __aenter__(self):
+    async def __aenter__(self) -> "ApolloKafkaProducer":
         await self.start()
         return self
 
@@ -108,7 +120,7 @@ class ApolloKafkaProducer:
         arguments: self, exc_type (exception type, None if no exception), exc_val (exception value, None if no exception), exc_tb (traceback object, None if no exception)
         EXPECTED TO return: None
     """
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
         await self.stop()
 
     """
@@ -134,8 +146,8 @@ class ApolloKafkaProducer:
                             raise
                         except (TypeError, Exception) as e:
                             logger.error(f"(Apollo) Error while preparing an event for payload for Kafka, potentially a malformed event, routing to DLQ: {e}")
-                            dlq_topic = f"{topic}-dlq"
-                            dlq_payload = orjson.dumps({"error": str(e), "raw_event": str(event)})
+                            dlq_topic: str = f"{topic}-dlq"
+                            dlq_payload: bytes = orjson.dumps({"error": str(e), "raw_event": str(event)})
                             payload.setdefault(dlq_topic, {}).setdefault(b"error", []).append(dlq_payload)
                             continue # continue to next event
                     payload.update({topic: per_topic}) # add the processed topic to the payload
@@ -164,6 +176,9 @@ class ApolloKafkaProducer:
             opened_locally: bool = self._producer is None
             if opened_locally:
                 await self.start()
+
+            if self._producer is None: # uv check demanded more robustness here apparently, go figure
+                return None
 
             record_metadata: RecordMetadata = await self._producer.send_and_wait(topic=topic, value=value, key=key) # sends event and waits for broker acknowledgement (ACK)
             logger.debug(f"(Apollo) Event delivered to Kafka topic '{topic}' [partition {record_metadata.partition}, offset {record_metadata.offset}]") # debug log with partition/offset metadata
@@ -204,12 +219,12 @@ class ApolloKafkaProducer:
                 
                 for topic, partition_key_dict in payload.items(): # separate gather tasks by topics
                     try:
-                        tasks = [
+                        tasks: list[Any] = [
                             self.send_event(topic, event, partition_key)
                             for partition_key, event_list in partition_key_dict.items()
                             for event in event_list
                         ]
-                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        results: list[Any] = await asyncio.gather(*tasks, return_exceptions=True)
                     except CancelledError:
                         logger.info("(Apollo) Kafka Producer run() was running, then was stopped by the user (KeyboardInterrupt)")
                         raise

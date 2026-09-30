@@ -3,6 +3,7 @@
     v1.0 - completed PostgresPersister with atomic bulk inserts and event deserialization
     v1.1 - integrated explicit conn.transaction() context manager for atomic batch commit and automatic rollback in psycopg 3
     v1.2 - added staging_transactions table bulk insert (sql_transactions) for 'myr-transactions' topic persistence
+    v1.3 - added variable type hints across persister methods
 """
 
 import os
@@ -15,14 +16,14 @@ from psycopg_pool import AsyncConnectionPool
 from aiokafka.structs import ConsumerRecord
 from typing import Any
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 load_dotenv()
 
-POSTGRES_USER = os.getenv("POSTGRES_USER")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST")
-POSTGRES_PORT = os.getenv("POSTGRES_PORT")
-POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_USER: str | None = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD: str | None = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_HOST: str | None = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT: str | None = os.getenv("POSTGRES_PORT")
+POSTGRES_DB: str | None = os.getenv("POSTGRES_DB")
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -92,17 +93,24 @@ class PostgresPersister:
         EXPECTED TO return: None
     """
     async def start(self) -> None:
-        if self._pool is None:
-            self.initialize()
-            try:
-                await self._pool.open() # opens the connection pool, which means it can start accepting client connections
-                logger.info(f"(Apollo) Postgres connection pool was opened successfully")
-            except Exception as e:
-                logger.error(f"(Apollo) Error while starting postgres connection pool: {e}")
-                self._pool = None
-        else:
-            logger.info(f"(Apollo) Postgres connection pool is already running!")
-
+        try:
+            if self._pool is None:
+                self.initialize()
+                assert self._pool is not None # same here, AssertionError will be caught by the newly added try-except
+                try:
+                    await self._pool.open() # opens the connection pool, which means it can start accepting client connections
+                    logger.info(f"(Apollo) Postgres connection pool was opened successfully")
+                except Exception as e:
+                    logger.error(f"(Apollo) Error while starting postgres connection pool: {e}")
+                    self._pool = None
+            else:
+                logger.info(f"(Apollo) Postgres connection pool is already running!")
+        except CancelledError:
+            logger.info(f"(Apollo) Attempted to initialize Postgres Persister and open its connection pool, but then was cancelled by the user (KeyboardInterrupt)")
+            raise
+        except Exception as e:
+            logger.error(f"(Apollo) Error while starting postgres connection pool: {e}")
+    
     """
         stops and closes the postgres connection pool gracefully
         arguments: self
@@ -124,7 +132,7 @@ class PostgresPersister:
         arguments: self
         EXPECTED TO return: the context manager instance (self)
     """
-    async def __aenter__(self):
+    async def __aenter__(self) -> "PostgresPersister":
         await self.start()
         return self
     
@@ -133,7 +141,7 @@ class PostgresPersister:
         arguments: self, exc_type (exception type, None if no exception), exc_val (exception value, None if no exception), exc_tb (traceback object, None if no exception)
         EXPECTED TO return: None
     """
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
         await self.stop()
     
     """
@@ -197,6 +205,7 @@ class PostgresPersister:
                 return False
             if (self._pool is None) or (self._pool.closed):
                 await self.start() # ensure pool is running
+            assert self._pool is not None # uv check's demand, but lowk its good cuz if it fails, then AssertionError is raised, but we already wrap this in a try-except so this is just another safeguard
             async with self._pool.connection() as conn:
                 async with conn.transaction(): # i forgor: this is the thing that actually handles transactions properly in psycopg 3, so on success it iwll commit automatically, and rollback on fail/exception. i think it was different back then or something
                     async with conn.cursor() as cur:

@@ -1,6 +1,7 @@
 """
     unit testing script for background consumer daemon service in consumer_daemon.py
     v0.1 - test fixtures and synthetic data setup for consumer daemon lifecycle, batch processing, and error handling
+    v1.0 - added variable type hints across fixtures
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -11,6 +12,7 @@ import signal
 import sys
 import orjson
 from uuid import uuid4
+from typing import Any
 from unittest.mock import patch, AsyncMock, MagicMock
 from aiokafka.structs import ConsumerRecord
 
@@ -23,13 +25,13 @@ from apollo.database.service import PostgresPersister
 # fixtures & synthetic test data
 
 @pytest.fixture
-def anyio_backend():
+def anyio_backend() -> str:
     return "asyncio"
 
 @pytest.fixture
 def sample_raw_records() -> list[ConsumerRecord]:
     """synthetic list of 3 ConsumerRecords spanning reviews, news, and transaction topics"""
-    review_bytes = orjson.dumps({
+    review_bytes: bytes = orjson.dumps({
         "event_id": str(uuid4()),
         "app_id": "my.com.gxbank.app",
         "app_name": "GX Bank",
@@ -40,7 +42,7 @@ def sample_raw_records() -> list[ConsumerRecord]:
         "submitted_at": "2026-08-10T14:30:00Z",
         "ingested_at": "2026-08-10T14:35:00Z"
     })
-    news_bytes = orjson.dumps({
+    news_bytes: bytes = orjson.dumps({
         "event_id": str(uuid4()),
         "article_uuid": "marketaux-uuid-12345",
         "title": "Bank Negara Malaysia Issues Updated Digital Banking Framework",
@@ -51,7 +53,7 @@ def sample_raw_records() -> list[ConsumerRecord]:
         "published_at": "2026-08-01T10:30:00Z",
         "ingested_at": "2026-08-01T10:35:00Z"
     })
-    tx_bytes = orjson.dumps({
+    tx_bytes: bytes = orjson.dumps({
         "transaction_id": str(uuid4()),
         "timestamp": "2026-09-24T18:30:00Z",
         "transaction_method": "DUITNOW_QR",
@@ -107,10 +109,10 @@ def sample_raw_records() -> list[ConsumerRecord]:
     ]
 
 @pytest.fixture
-def sample_parsed_records(sample_raw_records) -> dict[str, list[dict]]:
+def sample_parsed_records(sample_raw_records: list[ConsumerRecord]) -> dict[str, list[dict[str, Any]]]:
     """synthetic dictionary of deserialized event batches matching sample_raw_records"""
     return {
-        record.topic: [orjson.loads(record.value)] for record in sample_raw_records
+        record.topic: [orjson.loads(record.value or b"")] for record in sample_raw_records
     }
 
 @pytest.fixture
@@ -146,9 +148,9 @@ def sample_malformed_raw_records() -> list[ConsumerRecord]:
     ]
 
 @pytest.fixture
-def mock_kafka_consumer():
+def mock_kafka_consumer() -> MagicMock:
     """synthetic mock ApolloKafkaConsumer handler with async context manager and batch methods"""
-    mock_consumer = MagicMock(spec=ApolloKafkaConsumer)
+    mock_consumer: MagicMock = MagicMock(spec=ApolloKafkaConsumer)
     mock_consumer._consumer = MagicMock() # alive by default
     mock_consumer.get_batch = AsyncMock(return_value=[])
     mock_consumer.commit = AsyncMock()
@@ -157,11 +159,16 @@ def mock_kafka_consumer():
     return mock_consumer
 
 @pytest.fixture
-def mock_postgres_persister():
+def mock_postgres_persister() -> MagicMock:
     """synthetic mock PostgresPersister handler with async context manager and persistence methods"""
-    mock_persister = MagicMock(spec=PostgresPersister)
+    mock_persister: MagicMock = MagicMock(spec=PostgresPersister)
     mock_persister.parse_events = MagicMock(return_value={})
     mock_persister.persist_events = AsyncMock(return_value=True)
     mock_persister.__aenter__ = AsyncMock(return_value=mock_persister)
     mock_persister.__aexit__ = AsyncMock(return_value=None)
     return mock_persister
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    pass

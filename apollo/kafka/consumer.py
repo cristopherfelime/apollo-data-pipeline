@@ -3,17 +3,19 @@
     v1.0 - completed ApolloKafkaConsumer with batch polling, manual commit, and lifecycle management
     v1.1 - added graceful unclosed client disposal on failed startup and defensive None check in get_batch()
     v1.2 - updated default subscribed topics to include 'myr-transactions'
+    v1.3 - added variable type hints across consumer methods
 """
 
 import os
 import logging
 import asyncio
 from asyncio import CancelledError
+from typing import Any
 from dotenv import load_dotenv
 from aiokafka import AIOKafkaConsumer
-from aiokafka.structs import ConsumerRecord
+from aiokafka.structs import ConsumerRecord, TopicPartition # TopicPartition for type hinting purpose, caught by uv check (goat fr)
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 load_dotenv()
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -74,21 +76,31 @@ class ApolloKafkaConsumer:
         EXPECTED TO return: None
     """
     async def start(self) -> None:
-        if self._consumer is None:
-            try:
-                self.initialize()
-                await self._consumer.start()
-                logger.info(f"(Apollo) Kafka Consumer started successfully with bootstrap servers: {self.bootstrap_servers}")
-            except Exception as e:
-                logger.error(f"(Apollo) Error while starting Kafka Consumer: {e}")
-                if self._consumer is not None: # in case of KafkaConnectionError where AIOKafkaConsumer instance is made but no connection succeed, it will also be stopped gracefully this time """
-                    """
-                        2026-09-13 18:44:05,372 [ERROR] Unclosed AIOKafkaConsumer consumer: <aiokafka.consumer.consumer.AIOKafkaConsumer object at 0x74c71e557bf0>
-                    """
-                    await self._consumer.stop()
-                    self._consumer = None
-        else:
-            logger.info(f"(Apollo) Kafka Consumer already running!")
+        try:
+            if self._consumer is None:
+                try:
+                    self.initialize()
+                    assert self._consumer is not None # check service.py for explanation of assert
+                    await self._consumer.start()
+                    logger.info(f"(Apollo) Kafka Consumer started successfully with bootstrap servers: {self.bootstrap_servers}")
+                except Exception as e:
+                    logger.error(f"(Apollo) Error while starting Kafka Consumer: {e}")
+                    if self._consumer is not None: # in case of KafkaConnectionError where AIOKafkaConsumer instance is made but no connection succeed, it will also be stopped gracefully this time """
+                        """
+                            2026-09-13 18:44:05,372 [ERROR] Unclosed AIOKafkaConsumer consumer: <aiokafka.consumer.consumer.AIOKafkaConsumer object at 0x74c71e557bf0>
+                        """
+                        await self._consumer.stop()
+                        self._consumer = None
+            else:
+                logger.info(f"(Apollo) Kafka Consumer already running!")
+        except CancelledError:
+            logger.info(f"(Apollo) Attempted to start Kafka Consumer, but then was cancelled by the user (KeyboardInterrupt)")
+            raise
+        except Exception as e:
+            logger.error(f"(Apollo) Error while starting Kafka Consumer: {e}")
+            if self._consumer is not None:
+                await self._consumer.stop()
+                self._consumer = None
 
     """
         stops kafka consumer instance and gracefully leaves the consumer group
@@ -111,7 +123,7 @@ class ApolloKafkaConsumer:
         arguments: self
         EXPECTED TO return: the context manager instance (self)
     """
-    async def __aenter__(self):
+    async def __aenter__(self) -> "ApolloKafkaConsumer":
         await self.start()
         return self
     
@@ -120,7 +132,7 @@ class ApolloKafkaConsumer:
         arguments: self, exc_type (exception type, None if no exception), exc_val (exception value, None if no exception), exc_tb (traceback object, None if no exception)
         EXPECTED TO return: None
     """
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
         await self.stop()
 
     """

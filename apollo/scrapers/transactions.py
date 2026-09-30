@@ -5,6 +5,7 @@
     v1.0 - docstrings are finished, generate_transaction() was made synchronous due to actually not having to await any async coroutines innit, Faker malaysian locale stuff apparently do not exist so I had to just write my own locale, odds of fraudulent transactions are now properly evaluated to 0.5% cuz apparently Faker.boolean chance_of_getting_true is unable to evaluate floats, user_id are no longer fully randomly generated (for artemis!)
     v1.0.1 - added min_value constraint to amount_myr generation, user_pool are now generated in __init__ instead of as a class attribute to avoid the class attribute being shared across multiple instances (should there be more than one)
     v1.1 - persisted user_pool to local text file (apollo/scrapers/data/user_pool.txt) with st_size check and __file__ path resolution to maintain consistent user history across pipeline runs for Artemis
+    v1.2 - added variable type hints across generator methods
 """
 
 import logging
@@ -16,11 +17,12 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from collections.abc import AsyncIterator # apparently this is used for async generators like stream_transactions()
 from pathlib import Path # for user_pool.txt writing and loading
+from typing import Literal
 
 from apollo.schemas import TransactionPayload
 
-logger = logging.getLogger(__name__)
-USER_POOL_FILE = Path(__file__).resolve().parent / "data" / "user_pool.txt" # resolves the user_pool.txt file path to the parent folder of this (transactions.py) file, which is apollo/scrapers. also for note, better to use that slash operator for pathlib.Path joining instead of hardcoding "/" for os independence
+logger: logging.Logger = logging.getLogger(__name__)
+USER_POOL_FILE: Path = Path(__file__).resolve().parent / "data" / "user_pool.txt" # resolves the user_pool.txt file path to the parent folder of this (transactions.py) file, which is apollo/scrapers. also for note, better to use that slash operator for pathlib.Path joining instead of hardcoding "/" for os independence
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -163,7 +165,7 @@ class TransactionGenerator:
                 USER_POOL_FILE.parent.mkdir(parents=True, exist_ok=True) # creates parent directory of file if it doesn't exist
                 with open(USER_POOL_FILE, "w", encoding="utf-8") as f: # open the file as f
                     for _ in range(1000): # iterate 1000 times
-                        user_uuid = uuid4() # randomly generate a uuid each iteration
+                        user_uuid: UUID = uuid4() # randomly generate a uuid each iteration
                         f.write(f"{user_uuid}\n") # writing the UUID to the file
                         self.user_pool.append(user_uuid) # append in-memory as well to avoid redundant file reads
             except Exception as e: # similar to above essentially
@@ -188,28 +190,32 @@ class TransactionGenerator:
             ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))]
             is_flagged_fraud: Annotated[bool, Field(description="boolean flag indicating if the transaction is flagged as fraud (ts primarily for artemis later)")]
         """
-        timestamp = self.fake.date_time_between( # returns timezone aware date time object (up to the microsecond!) ranging from 30 days ago to now
+        timestamp: datetime = self.fake.date_time_between( # returns timezone aware date time object (up to the microsecond!) ranging from 30 days ago to now
             start_date="-30d",
             end_date="now",
             tzinfo=timezone.utc
         )
-        transaction_method = ["DUITNOW_QR", "CREDIT_CARD", "DEBIT_CARD", "FPX", "E_WALLET"]
-        amount_myr = self.fake.pydecimal(
+        transaction_methods: list[Literal["DUITNOW_QR", "CREDIT_CARD", "DEBIT_CARD", "FPX", "E_WALLET"]] = [
+            "DUITNOW_QR", "CREDIT_CARD", "DEBIT_CARD", "FPX", "E_WALLET"
+        ]
+        amount_myr: Decimal = self.fake.pydecimal(
             left_digits=4,
             right_digits=2,
             positive=True,
             min_value=Decimal("0.01") # to not violate pydantic model validation
         ) # returns a Decimal object, 4 digits to the left of decimal and 2 digits to the right (so 2 decimal places, example: 9999.99), always positive too
-        user_id = random.choice(self.user_pool)
-        merchant_mcc = random.choice(list(self.MALAYSIAN_MERCHANTS.keys())) # randomly select an MCC category key from our Malaysian merchants dictionary above, convert dict_keys to list then pick randomly
-        merchant_name = random.choice(self.MALAYSIAN_MERCHANTS[merchant_mcc]) # pick a real Malaysian merchant matching that exact MCC, from the selected mcc key above it will randomly pick from the list of merchant names
-        payment_status = ["SUCCESS", "FAILED", "PENDING", "REVERSED"]
-        is_flagged_fraud = random.random() < 0.005 # returns True if the random number between 0.0 and 1.0 returns less than 0.005, which should properly simulates 0.5% fraudulent transactions rate
+        user_id: UUID = random.choice(self.user_pool)
+        merchant_mcc: str = random.choice(list(self.MALAYSIAN_MERCHANTS.keys())) # randomly select an MCC category key from our Malaysian merchants dictionary above, convert dict_keys to list then pick randomly
+        merchant_name: str = random.choice(self.MALAYSIAN_MERCHANTS[merchant_mcc]) # pick a real Malaysian merchant matching that exact MCC, from the selected mcc key above it will randomly pick from the list of merchant names
+        payment_statuses: list[Literal["SUCCESS", "FAILED", "PENDING", "REVERSED"]] = [
+            "SUCCESS", "FAILED", "PENDING", "REVERSED"
+        ]
+        is_flagged_fraud: bool = random.random() < 0.005 # returns True if the random number between 0.0 and 1.0 returns less than 0.005, which should properly simulates 0.5% fraudulent transactions rate
 
         return TransactionPayload(
             timestamp=timestamp,
             transaction_method=random.choices( # random.choices() gives us the option to modify the weights (chances) of each item getting selected, useful to mimic or simulate which transaction methods are more oftenly used
-                transaction_method,
+                transaction_methods,
                 weights=[40, 20, 15, 15, 10],
                 k=1
             )[0], # from here we also return 1 object inside a collection, so we take the first index
@@ -218,7 +224,7 @@ class TransactionGenerator:
             merchant_name=merchant_name,
             merchant_mcc=merchant_mcc,
             payment_status=random.choices(
-                payment_status,
+                payment_statuses,
                 weights=[80, 10, 5, 5],
                 k=1
             )[0],

@@ -5,6 +5,7 @@
         v1.3.1 - fixed wrong kafka topic label in TransactionPayload docstring, modified some field names in TransactionPayload, and found out about pydantic's automatic ISO 8601 string conversion so cool
         v1.3.2 - used PlainSerializer to change model_dump(mode="json") behavior from parsing Decimal to string to immediately cast it to float, check amount_myr again
         v1.3.3 - cleaned up TransactionPayload model_config (no aliases needed), updated outdated comments regarding native Pydantic v2 ISO 8601 parsing
+        v1.4 - added variable type hints across field validators
 """
 
 import re # re is used for regular expressions, which is used for cleaning review text down below (re.sub())
@@ -69,8 +70,8 @@ class ReviewPayload(BaseModel): # a class inherits Pydantic's BaseModel to autom
     @classmethod # classmethod is a method that belongs to the class and not to an instance of the class, like static method but can access class attributes
     def clean_review_text(cls, review_text: str) -> str: # type hinting the parameter as str
         if isinstance(review_text, str): # checking if the review text is a string
-            stripped_text = HTML_REGEX_CLEANER.sub(" ", review_text) # using the regex compile from above, it will substitute any html tags and entities with a single space
-            cleaned_text = " ".join(stripped_text.split()) # split the string by whitespace and join it back with single space in between each word to remove extra spaces
+            stripped_text: str = HTML_REGEX_CLEANER.sub(" ", review_text) # using the regex compile from above, it will substitute any html tags and entities with a single space
+            cleaned_text: str = " ".join(stripped_text.split()) # split the string by whitespace and join it back with single space in between each word to remove extra spaces
             return cleaned_text # finally return the cleaned review text
         return review_text # return the review text as is if it's not a string
     # note: i heard beautifulsoup can actually do this typa cleaning better and more robust (some malformed html tags like missing tags can break this one currently)
@@ -133,8 +134,8 @@ class FinancialNewsPayload(BaseModel):
     @classmethod
     def clean_news_text(cls, news_text: str) -> str:
         if isinstance(news_text, str):
-            stripped_text = HTML_REGEX_CLEANER.sub(" ", news_text)
-            cleaned_text = " ".join(stripped_text.split())
+            stripped_text: str = HTML_REGEX_CLEANER.sub(" ", news_text)
+            cleaned_text: str = " ".join(stripped_text.split())
             return cleaned_text
         return news_text
 

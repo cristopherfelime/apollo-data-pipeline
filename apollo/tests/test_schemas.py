@@ -4,6 +4,7 @@
     v1.1 - added comprehensive test suite for TransactionPayload covering Decimal serialization, ISO timestamp parsing, MCC code validation, and immutability
     v1.1.1 - turned mechant_mcc regex pattern validation unit test block docstring to raw string to avoid dumbahh terminal warning
     v1.2 - added boundary and invalidation tests for review_text length, news title and snippet limits, invalid timestamp string, non-UUID user_id, merchant_name max length, minimum valid amount_myr boundary, and is_flagged_fraud
+    v1.3 - added variable type hints across test cases and fixtures
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -11,6 +12,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
 from decimal import Decimal
+from typing import Any
 from pydantic import ValidationError
 
 from apollo.schemas import ReviewPayload, FinancialNewsPayload, TransactionPayload
@@ -25,7 +27,7 @@ from apollo.schemas import ReviewPayload, FinancialNewsPayload, TransactionPaylo
     primarily tests field aliases, field validators (on submitted_at datetime modification and review_text cleaning), and auto-generation of event_id and ingested_at timestamps
 """
 def test_review_payload_valid_from_scraper_dict() -> None:
-    raw_data = { # synthetic review data
+    raw_data: dict[str, Any] = { # synthetic review data
         "appId": "my.com.gxbank.app",
         "title": "GX Bank",
         "userName": "Alice Tan",
@@ -34,7 +36,7 @@ def test_review_payload_valid_from_scraper_dict() -> None:
         "appVersion": "1.2.0",
         "at": datetime(2026, 8, 1, 12, 0, 0)
     }
-    payload = ReviewPayload(**raw_data) # initialize ReviewPayload model with unpacked raw_data, testing field aliases and validators
+    payload: ReviewPayload = ReviewPayload(**raw_data) # initialize ReviewPayload model with unpacked raw_data, testing field aliases and validators
     assert isinstance(payload.event_id, UUID) # testing auto-generation of event_id UUID
     assert payload.app_id == "my.com.gxbank.app" # testing field alias
     assert payload.app_name == "GX Bank" # testing field alias
@@ -49,7 +51,7 @@ def test_review_payload_valid_from_scraper_dict() -> None:
     primarily tests field validator for review_text
 """
 def test_review_payload_html_cleaning() -> None:
-    payload = ReviewPayload( # using fixed values since this only tests review_text cleaning
+    payload: ReviewPayload = ReviewPayload( # using fixed values since this only tests review_text cleaning
         app_id="com.maybank2u.life",
         app_name="MAE",
         user_name="Bob",
@@ -142,7 +144,7 @@ def test_review_payload_extra_fields_forbidden() -> None:
             review_text="Great app!",
             rating=5,
             submitted_at=datetime.now(timezone.utc),
-            unexpected_extra_field="malicious_or_unknown_data" # invalid, extra fields are forbidden
+            unexpected_extra_field="malicious_or_unknown_data" # type: ignore # invalid, extra fields are forbidden
         )
 
 """
@@ -152,7 +154,7 @@ def test_review_payload_extra_fields_forbidden() -> None:
 """
 def test_review_payload_frozen_immutability() -> None:
     """tests that ReviewPayload instances cannot be mutated"""
-    payload = ReviewPayload(
+    payload: ReviewPayload = ReviewPayload(
         app_id="com.maybank2u.life",
         app_name="MAE",
         user_name="Bob",
@@ -161,7 +163,7 @@ def test_review_payload_frozen_immutability() -> None:
         submitted_at=datetime.now(timezone.utc)
     )
     with pytest.raises(ValidationError):
-        payload.rating = 4
+        payload.rating = 4 # type: ignore
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -173,7 +175,7 @@ def test_review_payload_frozen_immutability() -> None:
     primarily tests field aliases (uuid), field validators (title/snippet cleaning), and auto-generation of event_id and ingested_at timestamps
 """
 def test_financial_news_valid_from_scraper_dict() -> None:
-    raw_data = { # synthetic marketaux news data
+    raw_data: dict[str, Any] = { # synthetic marketaux news data
         "uuid": "marketaux-article-uuid-12345",
         "title": "Bank Negara Malaysia Issues New Digital Banking Framework",
         "snippet": "BNM today announced updated operational frameworks for all licensed digital banks...",
@@ -182,7 +184,7 @@ def test_financial_news_valid_from_scraper_dict() -> None:
         "sentiment_score": 0.45,
         "published_at": datetime(2026, 8, 1, 10, 30, 0, tzinfo=timezone.utc)
     }
-    payload = FinancialNewsPayload(**raw_data) # initialize FinancialNewsPayload model with unpacked raw_data
+    payload: FinancialNewsPayload = FinancialNewsPayload(**raw_data) # initialize FinancialNewsPayload model with unpacked raw_data
     assert isinstance(payload.event_id, UUID) # testing auto-generation of event_id UUID
     assert payload.article_uuid == "marketaux-article-uuid-12345" # testing field alias
     assert payload.title == "Bank Negara Malaysia Issues New Digital Banking Framework"
@@ -197,7 +199,7 @@ def test_financial_news_valid_from_scraper_dict() -> None:
     primarily tests sentiment_score nullable field validation
 """
 def test_financial_news_valid_none_sentiment() -> None:
-    payload = FinancialNewsPayload(
+    payload: FinancialNewsPayload = FinancialNewsPayload(
         article_uuid="news-uuid-none-sentiment",
         title="Maybank Expands Cross-Border QR Payment Network",
         snippet="Maybank announced new bilateral QR payment integrations...",
@@ -214,7 +216,7 @@ def test_financial_news_valid_none_sentiment() -> None:
     primarily tests field validator for clean_news_text
 """
 def test_financial_news_html_cleaning() -> None:
-    payload = FinancialNewsPayload(
+    payload: FinancialNewsPayload = FinancialNewsPayload(
         article_uuid="news-html-clean-123",
         title="<h1>Digital Banks Surpass &lt;500k&gt; Users</h1>",
         snippet="<p>GX Bank and Boost Bank report <b>strong</b> customer growth in Q2.</p>",
@@ -327,7 +329,7 @@ def test_financial_news_extra_fields_forbidden() -> None:
             source="thestar.com.my",
             sentiment_score=0.2,
             published_at=datetime.now(timezone.utc),
-            unexpected_extra_field="some_unknown_property" # invalid, extra fields are forbidden
+            unexpected_extra_field="some_unknown_property" # type: ignore # invalid, extra fields are forbidden
         )
 
 """
@@ -337,7 +339,7 @@ def test_financial_news_extra_fields_forbidden() -> None:
 """
 def test_financial_news_frozen_immutability() -> None:
     """tests that FinancialNewsPayload instances cannot be mutated"""
-    payload = FinancialNewsPayload(
+    payload: FinancialNewsPayload = FinancialNewsPayload(
         article_uuid="news-123",
         title="Valid Title Here",
         snippet="Valid Snippet Here",
@@ -347,7 +349,7 @@ def test_financial_news_frozen_immutability() -> None:
         published_at=datetime.now(timezone.utc)
     )
     with pytest.raises(ValidationError):
-        payload.title = "Modified Title" # invalid, model is frozen
+        payload.title = "Modified Title" # type: ignore # invalid, model is frozen
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -359,8 +361,8 @@ def test_financial_news_frozen_immutability() -> None:
     primarily tests default uuid generation, string ISO 8601 parsing, and auto-generation of transaction_id and ingested_at timestamps
 """
 def test_transaction_payload_valid_from_dict() -> None:
-    test_user_id = uuid4()
-    raw_data = { # synthetic transaction data
+    test_user_id: UUID = uuid4()
+    raw_data: dict[str, Any] = { # synthetic transaction data
         "timestamp": "2026-09-20T14:30:00Z",
         "transaction_method": "DUITNOW_QR",
         "amount_myr": Decimal("25.50"),
@@ -370,7 +372,7 @@ def test_transaction_payload_valid_from_dict() -> None:
         "payment_status": "SUCCESS",
         "is_flagged_fraud": False
     }
-    payload = TransactionPayload(**raw_data) # initialize TransactionPayload model with unpacked raw_data
+    payload: TransactionPayload = TransactionPayload(**raw_data) # initialize TransactionPayload model with unpacked raw_data
     assert isinstance(payload.transaction_id, UUID) # testing auto-generation of transaction_id UUID
     assert payload.timestamp.tzinfo == timezone.utc # testing automatic ISO string conversion to UTC datetime
     assert payload.transaction_method == "DUITNOW_QR"
@@ -388,7 +390,7 @@ def test_transaction_payload_valid_from_dict() -> None:
     primarily tests that Decimal amounts are serialized to float instead of string for orjson compatibility downstream
 """
 def test_transaction_payload_plain_serializer_json_dump() -> None:
-    payload = TransactionPayload(
+    payload: TransactionPayload = TransactionPayload(
         timestamp=datetime.now(timezone.utc),
         transaction_method="FPX",
         amount_myr=Decimal("1250.75"),
@@ -398,12 +400,12 @@ def test_transaction_payload_plain_serializer_json_dump() -> None:
         payment_status="SUCCESS",
         is_flagged_fraud=False
     )
-    dumped_json = payload.model_dump(mode="json")
+    dumped_json: dict[str, Any] = payload.model_dump(mode="json")
     assert isinstance(dumped_json["amount_myr"], float) # PlainSerializer should serialize Decimal to float in JSON mode
     assert dumped_json["amount_myr"] == 1250.75
 
     # standard python mode should still retain Decimal
-    dumped_python = payload.model_dump(mode="python")
+    dumped_python: dict[str, Any] = payload.model_dump(mode="python")
     assert isinstance(dumped_python["amount_myr"], Decimal)
 
 """ 
@@ -413,8 +415,8 @@ def test_transaction_payload_plain_serializer_json_dump() -> None:
 """
 def test_transaction_payload_timestamp_conversions() -> None:
     # naive datetime gets converted to UTC
-    naive_dt = datetime(2026, 9, 20, 10, 0, 0)
-    payload_naive = TransactionPayload(
+    naive_dt: datetime = datetime(2026, 9, 20, 10, 0, 0)
+    payload_naive: TransactionPayload = TransactionPayload(
         timestamp=naive_dt,
         transaction_method="DEBIT_CARD",
         amount_myr=Decimal("15.00"),
@@ -428,9 +430,9 @@ def test_transaction_payload_timestamp_conversions() -> None:
     assert payload_naive.timestamp.hour == 10
 
     # non-UTC timezone-aware datetime (+08:00 Malaysia time) gets converted to UTC
-    kl_tz = timezone(timedelta(hours=8))
-    aware_dt = datetime(2026, 9, 20, 16, 0, 0, tzinfo=kl_tz)
-    payload_aware = TransactionPayload(
+    kl_tz: timezone = timezone(timedelta(hours=8))
+    aware_dt: datetime = datetime(2026, 9, 20, 16, 0, 0, tzinfo=kl_tz)
+    payload_aware: TransactionPayload = TransactionPayload(
         timestamp=aware_dt,
         transaction_method="CREDIT_CARD",
         amount_myr=Decimal("88.00"),
@@ -444,7 +446,7 @@ def test_transaction_payload_timestamp_conversions() -> None:
     assert payload_aware.timestamp.hour == 8 # 16:00 +08:00 is 08:00 UTC
 
     # ISO 8601 string with +00:00
-    payload_iso = TransactionPayload(
+    payload_iso: TransactionPayload = TransactionPayload(
         timestamp="2026-09-20T12:00:00+00:00",
         transaction_method="E_WALLET",
         amount_myr=Decimal("5.50"),
@@ -507,7 +509,7 @@ def test_transaction_payload_invalid_amount() -> None:
     primarily tests gt=Decimal('0.00') acceptance of RM 0.01
 """
 def test_transaction_payload_amount_minimum_boundary() -> None:
-    payload = TransactionPayload(
+    payload: TransactionPayload = TransactionPayload(
         timestamp=datetime.now(timezone.utc),
         transaction_method="DUITNOW_QR",
         amount_myr=Decimal("0.01"), # minimum valid amount
@@ -525,6 +527,7 @@ r""" (this needs to be a raw string or else there will be SyntaxWarning: invalid
     primarily tests 4-digit code constraint (pattern=r'^\d{4}$')
 """
 def test_transaction_payload_invalid_mcc() -> None:
+    bad_mcc: str
     for bad_mcc in ["123", "12345", "abcd", "", "12a4"]:
         with pytest.raises(ValidationError):
             TransactionPayload(
@@ -548,7 +551,7 @@ def test_transaction_payload_invalid_literal_fields() -> None:
     with pytest.raises(ValidationError):
         TransactionPayload(
             timestamp=datetime.now(timezone.utc),
-            transaction_method="BITCOIN", # not in Literal enum allowed payment rails
+            transaction_method="BITCOIN", # type: ignore # not in Literal enum allowed payment rails
             amount_myr=Decimal("50.00"),
             user_id=uuid4(),
             merchant_name="Test Merchant",
@@ -566,7 +569,7 @@ def test_transaction_payload_invalid_literal_fields() -> None:
             user_id=uuid4(),
             merchant_name="Test Merchant",
             merchant_mcc="5411",
-            payment_status="CANCELLED", # not in Literal enum allowed statuses
+            payment_status="CANCELLED", # type: ignore # not in Literal enum allowed statuses
             is_flagged_fraud=False
         )
 
@@ -604,7 +607,7 @@ def test_transaction_payload_extra_fields_forbidden() -> None:
             merchant_mcc="5411",
             payment_status="SUCCESS",
             is_flagged_fraud=False,
-            unexpected_field="should_fail_immediately" # invalid, extra fields are forbidden
+            unexpected_field="should_fail_immediately" # type: ignore # invalid, extra fields are forbidden
         )
 
 """ 
@@ -613,7 +616,7 @@ def test_transaction_payload_extra_fields_forbidden() -> None:
     primarily tests frozen=True in model_config
 """
 def test_transaction_payload_frozen_immutability() -> None:
-    payload = TransactionPayload(
+    payload: TransactionPayload = TransactionPayload(
         timestamp=datetime.now(timezone.utc),
         transaction_method="DUITNOW_QR",
         amount_myr=Decimal("20.00"),
@@ -624,7 +627,7 @@ def test_transaction_payload_frozen_immutability() -> None:
         is_flagged_fraud=False
     )
     with pytest.raises(ValidationError):
-        payload.amount_myr = Decimal("30.00") # invalid, model is frozen
+        payload.amount_myr = Decimal("30.00") # type: ignore # invalid, model is frozen
 
 """
     INVALIDATION TEST
