@@ -85,11 +85,31 @@ def test_transactions_user_pool_exists(mock_transaction_generator: TransactionGe
 
     # we can just assert about the generator's user_pool directly now to see if the write and read i/o operations from the tmp_path was properly done (we will still test the actual file operations though, see below)
     assert pool_file.is_file() # assert if the txt file actually exists on the disk
+    assert pool_file.exists() # same as abpve
     assert pool_file.stat().st_size > 0 # assert if the txt file is not empty
     
     # testing the loaded user pool data now
     assert len(generator.user_pool) == 1000 # if loaded and formatted properly, length should be 1k
     assert isinstance(generator.user_pool[0], UUID) # assert if the loaded data is indeed a list of UUID objects
+
+"""
+    method docstring placeholder
+"""
+def test_transactions_user_pool_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    missing_file: Path = tmp_path / "data" / "user_pool.txt"
+    assert not missing_file.is_file() # this and below asserts that user_pool.txt does not exist yet at first
+    assert not missing_file.exists()
+
+    monkeypatch.setattr("apollo.scrapers.transactions.USER_POOL_FILE", missing_file)
+    generator: TransactionGenerator = TransactionGenerator()
+
+    # the __init__ of TransactionGenerator should automatically create the file if it does not exist
+    assert missing_file.is_file()
+    assert missing_file.exists()
+    assert missing_file.stat().st_size > 0
+    assert len(generator.user_pool) == 1000
+    assert isinstance(generator.user_pool[0], UUID)
+
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
