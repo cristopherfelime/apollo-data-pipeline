@@ -6,6 +6,7 @@
         v1.3.2 - used PlainSerializer to change model_dump(mode="json") behavior from parsing Decimal to string to immediately cast it to float, check amount_myr again
         v1.3.3 - cleaned up TransactionPayload model_config (no aliases needed), updated outdated comments regarding native Pydantic v2 ISO 8601 parsing
         v1.4 - added variable type hints across field validators
+        v1.4.1 - aligned FinancialNewsPayload url repetition bound to 255 (PostgreSQL DUPMAX and RFC domain limit) and noted \b (Python PCRE) vs \\y (PostgreSQL POSIX) dialect difference
 """
 
 import re # re is used for regular expressions, which is used for cleaning review text down below (re.sub())
@@ -118,7 +119,7 @@ class FinancialNewsPayload(BaseModel):
     article_uuid: Annotated[str, Field(alias="uuid")] # specific article UUID
     title: Annotated[str, Field(min_length=5, max_length=500)] # title of article
     snippet: Annotated[str, Field(max_length=2000)] # summary of article, description field is also a good alternative for snippet, as we've implemented this in MarketauxScraper
-    url: Annotated[str, Field(pattern=r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")]
+    url: Annotated[str, Field(pattern=r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,255}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")] # yeah, the \b must stay as \b here in python's side, \y is only for Postgres posix RE
     source: Annotated[str, Field(description="financial news website source")]
     sentiment_score: Annotated[float | None, Field(ge=-1.0, le=1.0)] # news sentiment score is between -1 and 1, heard that sometimes its not provided so None is allowed
     published_at: Annotated[datetime, Field(description="exact UTC timestamp of when article was published")] # original article published timestamp, pydantic v2 natively parses ISO 8601 strings into datetime objects

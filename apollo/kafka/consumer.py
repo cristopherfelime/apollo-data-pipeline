@@ -4,6 +4,7 @@
     v1.1 - added graceful unclosed client disposal on failed startup and defensive None check in get_batch()
     v1.2 - updated default subscribed topics to include 'myr-transactions'
     v1.3 - added variable type hints across consumer methods
+    v1.4 - added rewind_batch() to reset in-memory fetch positions on database persistence failures
 """
 
 import os
@@ -34,6 +35,7 @@ load_dotenv()
         stop -> asynchronously stops the kafka consumer connection
         __aenter__ -> enters the async context manager and starts the consumer
         __aexit__ -> exits the async context manager and stops the consumer
+        rewind_batch -> rewinds in-memory fetch positions to earliest uncommitted offsets per partition for retry
         get_batch -> pulls a batch of messages from subscribed topics up to max_records or until timeout_ms
         commit -> manually commits offsets for processed messages adhering to at-least-once delivery
 """
@@ -134,6 +136,25 @@ class ApolloKafkaConsumer:
     """
     async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> None:
         await self.stop()
+
+    """
+        rewinds kafka consumer in-memory fetch positions to earliest uncommitted offsets per topic-partition for a failed batch
+        arguments: self, records (list[ConsumerRecord]): list of consumer records from the failed batch
+        EXPECTED TO return: None
+    """
+    def rewind_batch(self, records: list[ConsumerRecord]) -> None: # essentially needed because aiokafka advances its internal fetch position in memory upon polling; if db persisting fails, we must seek() back to the earliest uncommitted offsets so subsequent get_batch() calls retry the failed records
+        if self._consumer is None or not records: # early return guard if consumer is dead or records list is empty
+            return
+
+        earliest_offsets: dict[TopicPartition, int] = {} # store earliest offsets per topic-partition pair (offsets are monotonically increasing within each partition)
+        for record in records:
+            tp: TopicPartition = TopicPartition(record.topic, record.partition)
+            if tp not in earliest_offsets or record.offset < earliest_offsets[tp]: # offsets are sequential, so the lowest offset encountered in the batch is the earliest uncommitted record
+                earliest_offsets[tp] = record.offset
+
+        for tp, offset in earliest_offsets.items(): # iterate through the earliest offsets per topic-partition pair after finding the minimum for each
+            self._consumer.seek(tp, offset) # and seek...
+        logger.info(f"(Apollo) Successfully rewinded Kafka offsets for {len(earliest_offsets)} partition(s)")
 
     """
         asynchronously fetches a batch of messages from subscribed topics up to max_records or until timeout_ms expires

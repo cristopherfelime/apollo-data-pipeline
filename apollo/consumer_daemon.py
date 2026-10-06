@@ -4,6 +4,7 @@
     v1.1 - added unparseable batch or offset acknowledgement guard to avoid infinite looping and broker downtime backoff
     v1.1.1 - removed unused Callable object import from typing package lol
     v1.2 - added variable type hints across consumer daemon lifecycle
+    v1.3 - added consumer rewind_batch() on persistence failure to rewind partition cursors for retry
 """
 
 import logging
@@ -69,6 +70,7 @@ async def main() -> None:
                     await consumer.commit()
                 else:
                     logger.error("(Apollo) Failed to persist events, skipping Kafka consumer offset commit for retry")
+                    consumer.rewind_batch(raw_records) # rewinds in-memory fetch positions per partition back to earliest uncommitted offsets so next get_batch() retries the failed records
                     await asyncio.sleep(2) # wait 2 secs before retrying to not overload the db, a simple rate limiting could change things!
                         
     except CancelledError:

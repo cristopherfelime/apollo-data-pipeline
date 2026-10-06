@@ -2,6 +2,8 @@
  postgres database initialization script
  v1.0
  v1.0.1 - added missing semicolon at the end of idx_staging_transactions_user_history lol
+ v1.1 - some records were skipped because maximum allowable integer in a repetition bound is 255, not 256. fixed that in url regex
+ v1.1.1 - changed \b to \y in chk_url_regex (PostgreSQL interprets \b as ASCII backspace 0x08; \y is the POSIX word boundary)
  */
 
 -- table schema for staging queue of play store reviews
@@ -48,7 +50,7 @@ CREATE TABLE IF NOT EXISTS staging_reviews (
     article_uuid: Annotated[str, Field(alias="uuid")]
     title: Annotated[str, Field(min_length=5, max_length=500)]
     snippet: Annotated[str, Field(max_length=2000)]
-    url: Annotated[str, Field(pattern=r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")]
+    url: Annotated[str, Field(pattern=r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,255}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")] -- uses \b in Python Pydantic, translated to \y in Postgres below
     source: Annotated[str, Field(description="financial news website source")]
     sentiment_score: Annotated[float | None, Field(ge=-1.0, le=1.0)]
     published_at: Annotated[datetime, Field(description="exact UTC timestamp of when article was published")]
@@ -73,8 +75,8 @@ CREATE TABLE IF NOT EXISTS staging_marketaux (
     CONSTRAINT chk_title_length CHECK ( -- following Field(min_length=5, max_length=500)
         (LENGTH(title) >= 5) AND (LENGTH(title) <= 500)
     ),
-    CONSTRAINT chk_url_regex CHECK ( -- following Field(pattern=r"^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$")
-        url ~ '^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$'
+    CONSTRAINT chk_url_regex CHECK ( -- in PostgreSQL POSIX regex, \y is word boundary (unlike PCRE/Python \b which matches ASCII backspace 0x08 in Postgres)
+        url ~ '^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,255}\.[a-zA-Z0-9()]{1,6}\y([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$'
     ),
     CONSTRAINT chk_snippet_length CHECK ( -- following Field(max_length=2000)
         LENGTH(snippet) <= 2000

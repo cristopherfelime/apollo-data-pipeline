@@ -4,6 +4,7 @@
 		v1.1 - standardized logging identifiers for main orchestrator and signal handling clarity
 		v1.2 - integrated TransactionGenerator to generate and stream synthetic Malaysian banking transactions to Kafka topic 'myr-transactions' partitioned by user_id
 		v1.3 - added variable type hints across orchestrator pipeline
+        v1.3.1 - nonono delay in stream_transactions() now
 """
 
 import logging
@@ -76,7 +77,7 @@ async def main() -> None:
         # related to faker transactions
         tx_generator: TransactionGenerator = TransactionGenerator()
         tx_count: int = 10000 # streams 10000 fake transactions
-        async for tx in tx_generator.stream_transactions(count=tx_count):
+        async for tx in tx_generator.stream_transactions(count=tx_count, delay=0): # no delay should fix the 100 seconds delay
             events["myr-transactions"].append((str(tx.user_id), tx.model_dump(mode="json"))) # here we use user_id as partition key to ensure same user's transactions are sent to same partition, good for data locality and stuff
         
         async with ApolloKafkaProducer() as producer:

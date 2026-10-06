@@ -570,8 +570,9 @@ async def test_consumer_daemon_persistence_failure_retry_backoff(
 
         await main()
 
-        # as the database failed persisting, the log should be logged, commit must be strictly skipped, and the daemon should sleep for 2 seconds (the simple rate limiting)
+        # as the database failed persisting, the log should be logged, commit must be strictly skipped, rewind_batch called, and the daemon should sleep for 2 seconds (the simple rate limiting)
         assert "(Apollo) Failed to persist events, skipping Kafka consumer offset commit for retry" in caplog.text
+        mock_kafka_consumer.rewind_batch.assert_called_once_with(sample_raw_records)
         mock_kafka_consumer.commit.assert_not_called() # commit must be strictly skipped
         mock_sleep.assert_awaited_once_with(2)
 

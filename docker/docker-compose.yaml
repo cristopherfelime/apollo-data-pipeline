@@ -1,6 +1,7 @@
 # docker compose thing
 # v 1.1 - pg-init folder as docker entrypoint for database initialization scripts, also added KAFKA_HEAP_OPTS to kafka_broker1
 # v 1.2 - configured 3 partitions and auto-creation for apache/kafka, added persistent kafka_data volume mount
+# v 1.3 - moved kafka_data mount from /tmp/kafka-logs to /var/lib/kafka/data ("appuser" owned kafka-logs somehow) and set KAFKA_LOG_DIRS, fixing AccessDeniedException. still idk how it worked the first time
 # used for running applications/platforms that requires multiple containers to run
 
 services:
@@ -28,12 +29,13 @@ services:
     ports:
       - ${KAFKA_PORT}:${KAFKA_PORT}
     volumes: # similar thing to postgres above, this is to ensure that kafka has a volume mounted, so whenever docker compose down, all thge topics, messages, consumer offsets, etc arent reset
-      - kafka_data:/tmp/kafka-logs #hostPath:containerPath:ro
+      - kafka_data:/var/lib/kafka/data # this path already exists in the image and is owned by appuser, so a fresh named volume inherits that ownership (unlike /tmp/kafka-logs which docker would create as root)
     environment:
       # note: INTERNAL for high speed inter-container communication
       # note: EXTERNAL for client/external-facing connections
       # note: CONTROLLER for controller-only node communication
       KAFKA_NODE_ID: 1 # kafka node/broker id 1 for this cluster
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data" # tells kafka to store its metadata and topic logs in the mounted volume path above
       KAFKA_PROCESS_ROLES: "broker,controller" # fulfills both data handling and cluster management control
       KAFKA_LISTENERS: "INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:${KAFKA_PORT},CONTROLLER://0.0.0.0:${KAFKA_CONTROLLER_PORT}" # binds kafka to all available network interfaces with 0.0.0.0 (including localhost and the container itself) for internal traffic on port 29092, client traffic on port 9092, and managament/controller traffic on port 9093
       KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka_broker1:29092,EXTERNAL://${KAFKA_HOST}:${KAFKA_PORT}" # IMPORTANT: this tells kafka what addresses to give back to clients so that clients also know where to connect back to the broker: "to talk to me for future read/write operations. if you're an external client, contact me at: localhost at port 9092. if youre a fellow container within the same compose, contact me at: kafka_broker1 at port 29092"
