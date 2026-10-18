@@ -3,6 +3,7 @@
     v1.1 - added start method calling assertion for mock producer in lifecycle and context manager tests
     v1.2 - updated ts to follow producer.py accordingly regarding dlq topic changes (primarily in _prepare_payload() testing of none fallback and dlq topic routing)
     v1.3 - added variable type hints across test cases and fixtures
+    v1.3.1 - added assert metadata is not None check in test_kafka_producer_send_event_success
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -292,6 +293,7 @@ async def test_kafka_producer_send_event_success(sample_review_event: dict[str, 
     event_bytes: bytes = orjson.dumps(sample_review_event) # taking that one sample_review_event and serializing them
     metadata: RecordMetadata | None = await default_producer.send_event(topic="app-reviews-events", value=event_bytes, key=b"my.com.gxbank.app") # setting topic, value, and key, sends that singular event above
 
+    assert metadata is not None # ensures the metadata was returned
     assert metadata is sample_record_metadata # verifies if the returned metadata is the exact same as sample_record_metadata
     assert metadata.topic == "app-reviews-events" # verifies metadata topic
     assert metadata.partition == 0 # verifies metadata partition

@@ -6,6 +6,7 @@
     v1.0.1 - added min_value constraint to amount_myr generation, user_pool are now generated in __init__ instead of as a class attribute to avoid the class attribute being shared across multiple instances (should there be more than one)
     v1.1 - persisted user_pool to local text file (apollo/scrapers/data/user_pool.txt) with st_size check and __file__ path resolution to maintain consistent user history across pipeline runs for Artemis
     v1.2 - added variable type hints across generator methods
+    v1.2.1 - pylance adherence modifications, added type: ignore annotation to TransactionPayload instantiation in generate_transaction() for downstream-generated fields
 """
 
 import logging
@@ -229,7 +230,7 @@ class TransactionGenerator:
                 k=1
             )[0],
             is_flagged_fraud=is_flagged_fraud
-        )
+        ) # type: ignore # intended to not have transaction_id and ingested_at as they're automatically created downstream
     
     """
         asynchronously streams generated transaction payloads using an async generator

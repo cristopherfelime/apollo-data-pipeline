@@ -4,6 +4,7 @@
     v1.1 - integrated explicit conn.transaction() context manager for atomic batch commit and automatic rollback in psycopg 3
     v1.2 - added staging_transactions table bulk insert (sql_transactions) for 'myr-transactions' topic persistence
     v1.3 - added variable type hints across persister methods
+    v1.3.1 - pylance adherence modifications: added local pool variable type narrowing and exception handling with graceful pool closure in start()
 """
 
 import os
@@ -94,15 +95,22 @@ class PostgresPersister:
     """
     async def start(self) -> None:
         try:
-            if self._pool is None:
-                self.initialize()
-                assert self._pool is not None # same here, AssertionError will be caught by the newly added try-except
+            pool: AsyncConnectionPool | None = self._pool
+            if pool is None:
                 try:
-                    await self._pool.open() # opens the connection pool, which means it can start accepting client connections
+                    self.initialize()
+                    pool = self._pool
+                    assert pool is not None # same here, AssertionError will be caught by the newly added try-except
+                    await pool.open() # opens the connection pool, which means it can start accepting client connections
+                    self._pool = pool
                     logger.info(f"(Apollo) Postgres connection pool was opened successfully")
                 except Exception as e:
                     logger.error(f"(Apollo) Error while starting postgres connection pool: {e}")
-                    self._pool = None
+                    if pool is not None:
+                        pool = None
+                    if self._pool is not None:
+                        await self._pool.close() # close the asyncconnectionpool is error
+                        self._pool = None
             else:
                 logger.info(f"(Apollo) Postgres connection pool is already running!")
         except CancelledError:

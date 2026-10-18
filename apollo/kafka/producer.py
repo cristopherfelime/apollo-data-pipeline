@@ -4,6 +4,7 @@
         v1.2.1.1 - start() now checks if _producer is an instance of AIOKafkaProducer or not
         v1.3 - kafka partition key can be None apparently, and i found out that there's no such thing as DLQ at partition level (in fact, it can even create a 'hot-spotting' in a specific key due to how its hashing partitioner works), so i moved them to topic level by making a new DLQ topic for each
         v1.4 - added variable type hints across producer pipeline and methods
+        v1.4.1 - pylance adherence modifications: fixed f-string quote nesting in __init__, added local variable type narrowing and graceful stop on startup failure in start(), and resolved Pylance unbound variable warnings in send_event() and run()
 """
 
 import logging
@@ -47,7 +48,7 @@ class ApolloKafkaProducer:
         arguments: self, bootstrap_servers (str): network address for producer (default: {os.getenv("KAFKA_HOST")}:{os.getenv("KAFKA_PORT")})
         EXPECTED TO return: None
     """
-    def __init__(self, bootstrap_servers: str=f"{os.getenv("KAFKA_HOST")}:{os.getenv("KAFKA_PORT")}") -> None: # bootstrap_servers defaults to network host and port within .env file
+    def __init__(self, bootstrap_servers: str=f"{os.getenv('KAFKA_HOST')}:{os.getenv('KAFKA_PORT')}") -> None: # bootstrap_servers defaults to network host and port within .env file
         self.bootstrap_servers: str = bootstrap_servers
         self._producer: AIOKafkaProducer | None = None
     
@@ -70,15 +71,22 @@ class ApolloKafkaProducer:
     """
     async def start(self) -> None:
         try:
-            if self._producer is None: # checks if the producer is not initialized
+            producer: AIOKafkaProducer | None = self._producer # adheres to pylance
+            if producer is None: # checks if the producer is not initialized
                 try: # attempt to initialize the producer instance and start them
                     self.initialize()
-                    assert self._producer is not None # check service.py for explanation of assert
-                    await self._producer.start()
+                    producer = self._producer
+                    assert producer is not None # check service.py for explanation of assert
+                    await producer.start()
+                    self._producer = producer
                     logger.info(f"(Apollo) Kafka Producer started successfully with bootstrap servers: {self.bootstrap_servers}")
                 except Exception as e:
                     logger.error(f"(Apollo) Error while starting Kafka Producer: {e}")
-                    self._producer = None # if error, set producer back to None to allow retries
+                    if producer is not None:
+                        producer = None # similar concept to below
+                    if self._producer is not None:
+                        await self._producer.stop() # continuiung below, we need to stop it first
+                        self._producer = None # if error, set producer back to None to allow retries
             else:
                 logger.info(f"(Apollo) Kafka Producer already running!")
         except CancelledError:
@@ -172,8 +180,9 @@ class ApolloKafkaProducer:
         EXPECTED TO return: RecordMetadata representing delivery confirmation (or None on failure)
     """
     async def send_event(self, topic: str, value: bytes | dict, key: str | bytes | None=None) -> RecordMetadata | None: # returns RecordMetadata on success
+        opened_locally: bool = False # same pylance adherence stuff
         try:
-            opened_locally: bool = self._producer is None
+            opened_locally = self._producer is None
             if opened_locally:
                 await self.start()
 
@@ -202,20 +211,23 @@ class ApolloKafkaProducer:
         EXPECTED TO return: dict mapping topic names to counts of successfully sent events (or None if return_results is False)
     """
     async def run(self, events: dict[str, list[tuple[str | None, dict]]], return_results: bool=False) -> dict[str, int] | None:
+        opened_locally: bool = False # same pylance adherence stuff
         try:
+            successes: dict[str, int] = {} # adhere-ing (or whatever the word is) to pylance abt it being possibly unbound
+            payload: dict[str, dict[bytes | None, list[bytes]]] | None = {} # same as above
             opened_locally: bool = self._producer is None
             try:
                 if opened_locally:
                     await self.start()
 
-                payload: dict[str, dict[bytes | None, list[bytes]]] | None = self._prepare_payload(events) # prepare the kafka payload
+                payload = self._prepare_payload(events) # prepare the kafka payload
                 
                 if not payload:
                     logger.warning("(Apollo) Payload is empty, nothing to stream to Kafka")
                     return None
 
                 if return_results: # if user wants to know how many events were sent per topic
-                    successes: dict[str, int] = dict.fromkeys(payload.keys(), 0) if payload else {} # success counts per topic: {"topic": 0} if payload exists, else empty dict
+                    successes = dict.fromkeys(payload.keys(), 0) if payload else {} # success counts per topic: {"topic": 0} if payload exists, else empty dict
                 
                 for topic, partition_key_dict in payload.items(): # separate gather tasks by topics
                     try:

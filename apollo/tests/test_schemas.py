@@ -5,6 +5,7 @@
     v1.1.1 - turned mechant_mcc regex pattern validation unit test block docstring to raw string to avoid dumbahh terminal warning
     v1.2 - added boundary and invalidation tests for review_text length, news title and snippet limits, invalid timestamp string, non-UUID user_id, merchant_name max length, minimum valid amount_myr boundary, and is_flagged_fraud
     v1.3 - added variable type hints across test cases and fixtures
+    v1.3.1 - added type: ignore comments across model instantiations for Pylance missing arguments adherence
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -58,7 +59,7 @@ def test_review_payload_html_cleaning() -> None:
         review_text="<b>Great app!</b> &amp; fast transfer.<br><br>Recommended!",
         rating=5,
         submitted_at=datetime.now(timezone.utc)
-    )
+    ) # type: ignore
     assert payload.review_text == "Great app! fast transfer. Recommended!" # expected output with HTML tags and entities stripped
 
 """
@@ -76,7 +77,7 @@ def test_review_payload_invalid_rating() -> None:
             review_text="Bad app",
             rating=6, # ts invalid, must be between 1-5
             submitted_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     INVALIDATION TEST
@@ -93,7 +94,7 @@ def test_review_payload_invalid_app_id() -> None:
             review_text="Test review text",
             rating=4,
             submitted_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     INVALIDATION TEST
@@ -110,7 +111,7 @@ def test_review_payload_empty_review_text() -> None:
             review_text="", # ts invalid, must be at least 2 characters
             rating=4,
             submitted_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     BOUNDARY TEST
@@ -127,7 +128,7 @@ def test_review_payload_review_text_max_length() -> None:
             review_text="A" * 2001, # invalid, exceeds max 2000 characters
             rating=4,
             submitted_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     INVALIDATION TEST
@@ -145,7 +146,7 @@ def test_review_payload_extra_fields_forbidden() -> None:
             rating=5,
             submitted_at=datetime.now(timezone.utc),
             unexpected_extra_field="malicious_or_unknown_data" # type: ignore # invalid, extra fields are forbidden
-        )
+        ) # type: ignore
 
 """
     IMMUTABILITY TEST
@@ -161,7 +162,7 @@ def test_review_payload_frozen_immutability() -> None:
         review_text="Original text",
         rating=5,
         submitted_at=datetime.now(timezone.utc)
-    )
+    ) # type: ignore
     with pytest.raises(ValidationError):
         payload.rating = 4 # type: ignore
 
@@ -207,7 +208,7 @@ def test_financial_news_valid_none_sentiment() -> None:
         source="fintechnews.my",
         sentiment_score=None, # None is explicitly allowed when sentiment analysis is unavailable, marketaux tend to do that
         published_at=datetime.now(timezone.utc)
-    )
+    ) # type: ignore
     assert payload.sentiment_score is None
 
 """
@@ -224,7 +225,7 @@ def test_financial_news_html_cleaning() -> None:
         source="fintechnews.my",
         sentiment_score=0.8,
         published_at=datetime.now(timezone.utc)
-    )
+    ) # type: ignore
     assert payload.title == "Digital Banks Surpass 500k Users" # expected output with stripped HTML tags and entities
     assert payload.snippet == "GX Bank and Boost Bank report strong customer growth in Q2."
 
@@ -244,7 +245,7 @@ def test_financial_news_invalid_url() -> None:
             source="thestar.com.my",
             sentiment_score=0.1,
             published_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     INVALIDATION TEST
@@ -262,7 +263,7 @@ def test_financial_news_invalid_sentiment_score() -> None:
             source="thestar.com.my",
             sentiment_score=1.5, # invalid, sentiment score must be between -1.0 and 1.0
             published_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     BOUNDARY TEST
@@ -281,7 +282,7 @@ def test_financial_news_invalid_title_length() -> None:
             source="thestar.com.my",
             sentiment_score=0.2,
             published_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
     # title over 500 characters
     with pytest.raises(ValidationError):
@@ -293,7 +294,7 @@ def test_financial_news_invalid_title_length() -> None:
             source="thestar.com.my",
             sentiment_score=0.2,
             published_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     BOUNDARY TEST
@@ -311,7 +312,7 @@ def test_financial_news_invalid_snippet_length() -> None:
             source="thestar.com.my",
             sentiment_score=0.2,
             published_at=datetime.now(timezone.utc)
-        )
+        ) # type: ignore
 
 """
     INVALIDATION TEST
@@ -330,7 +331,7 @@ def test_financial_news_extra_fields_forbidden() -> None:
             sentiment_score=0.2,
             published_at=datetime.now(timezone.utc),
             unexpected_extra_field="some_unknown_property" # type: ignore # invalid, extra fields are forbidden
-        )
+        ) # type: ignore
 
 """
     IMMUTABILITY TEST
@@ -347,7 +348,7 @@ def test_financial_news_frozen_immutability() -> None:
         source="thestar.com.my",
         sentiment_score=0.2,
         published_at=datetime.now(timezone.utc)
-    )
+    ) # type: ignore
     with pytest.raises(ValidationError):
         payload.title = "Modified Title" # type: ignore # invalid, model is frozen
 
@@ -399,7 +400,7 @@ def test_transaction_payload_plain_serializer_json_dump() -> None:
         merchant_mcc="5311",
         payment_status="SUCCESS",
         is_flagged_fraud=False
-    )
+    ) # type: ignore
     dumped_json: dict[str, Any] = payload.model_dump(mode="json")
     assert isinstance(dumped_json["amount_myr"], float) # PlainSerializer should serialize Decimal to float in JSON mode
     assert dumped_json["amount_myr"] == 1250.75
@@ -425,7 +426,7 @@ def test_transaction_payload_timestamp_conversions() -> None:
         merchant_mcc="5411",
         payment_status="SUCCESS",
         is_flagged_fraud=False
-    )
+    ) # type: ignore
     assert payload_naive.timestamp.tzinfo == timezone.utc
     assert payload_naive.timestamp.hour == 10
 
@@ -441,7 +442,7 @@ def test_transaction_payload_timestamp_conversions() -> None:
         merchant_mcc="5651",
         payment_status="SUCCESS",
         is_flagged_fraud=False
-    )
+    ) # type: ignore
     assert payload_aware.timestamp.tzinfo == timezone.utc
     assert payload_aware.timestamp.hour == 8 # 16:00 +08:00 is 08:00 UTC
 
@@ -455,7 +456,7 @@ def test_transaction_payload_timestamp_conversions() -> None:
         merchant_mcc="5814",
         payment_status="SUCCESS",
         is_flagged_fraud=False
-    )
+    ) # type: ignore
     assert payload_iso.timestamp.tzinfo == timezone.utc
 
 """ 
@@ -475,7 +476,7 @@ def test_transaction_payload_invalid_amount() -> None:
             merchant_mcc="5814",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
     # invalid: negative amount
     with pytest.raises(ValidationError):
@@ -488,7 +489,7 @@ def test_transaction_payload_invalid_amount() -> None:
             merchant_mcc="5814",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
     # invalid: more than 2 decimal places
     with pytest.raises(ValidationError):
@@ -501,7 +502,7 @@ def test_transaction_payload_invalid_amount() -> None:
             merchant_mcc="5814",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
 """
     VALIDATION TEST
@@ -518,7 +519,7 @@ def test_transaction_payload_amount_minimum_boundary() -> None:
         merchant_mcc="5411",
         payment_status="SUCCESS",
         is_flagged_fraud=False
-    )
+    ) # type: ignore
     assert payload.amount_myr == Decimal("0.01")
 
 r""" (this needs to be a raw string or else there will be SyntaxWarning: invalid escape sequence '\d' warning in terminal)
@@ -539,7 +540,7 @@ def test_transaction_payload_invalid_mcc() -> None:
                 merchant_mcc=bad_mcc, #  must be exactly 4 digits
                 payment_status="SUCCESS",
                 is_flagged_fraud=False
-            )
+            ) # type: ignore
 
 """ 
     INVALIDATION TEST
@@ -558,7 +559,7 @@ def test_transaction_payload_invalid_literal_fields() -> None:
             merchant_mcc="5411",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
     # invalid payment_status
     with pytest.raises(ValidationError):
@@ -571,7 +572,7 @@ def test_transaction_payload_invalid_literal_fields() -> None:
             merchant_mcc="5411",
             payment_status="CANCELLED", # type: ignore # not in Literal enum allowed statuses
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
 """ 
     INVALIDATION TEST
@@ -589,7 +590,7 @@ def test_transaction_payload_empty_merchant_name() -> None:
             merchant_mcc="5411",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
 """ 
     INVALIDATION TEST
@@ -608,7 +609,7 @@ def test_transaction_payload_extra_fields_forbidden() -> None:
             payment_status="SUCCESS",
             is_flagged_fraud=False,
             unexpected_field="should_fail_immediately" # type: ignore # invalid, extra fields are forbidden
-        )
+        ) # type: ignore
 
 """ 
     IMMUTABILITY TEST
@@ -625,7 +626,7 @@ def test_transaction_payload_frozen_immutability() -> None:
         merchant_mcc="5814",
         payment_status="SUCCESS",
         is_flagged_fraud=False
-    )
+    ) # type: ignore
     with pytest.raises(ValidationError):
         payload.amount_myr = Decimal("30.00") # type: ignore # invalid, model is frozen
 
@@ -645,7 +646,7 @@ def test_transaction_payload_invalid_timestamp() -> None:
             merchant_mcc="5411",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
 """
     INVALIDATION TEST
@@ -663,7 +664,7 @@ def test_transaction_payload_invalid_user_id() -> None:
             merchant_mcc="5411",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
 """
     BOUNDARY TEST
@@ -681,7 +682,7 @@ def test_transaction_payload_merchant_name_max_length() -> None:
             merchant_mcc="5411",
             payment_status="SUCCESS",
             is_flagged_fraud=False
-        )
+        ) # type: ignore
 
 """
     INVALIDATION TEST
@@ -699,7 +700,7 @@ def test_transaction_payload_invalid_fraud_flag() -> None:
             merchant_mcc="5411",
             payment_status="SUCCESS",
             is_flagged_fraud="not_a_boolean" # invalid boolean
-        )
+        ) # type: ignore
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 

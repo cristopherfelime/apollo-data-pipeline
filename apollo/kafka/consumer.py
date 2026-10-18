@@ -5,6 +5,7 @@
     v1.2 - updated default subscribed topics to include 'myr-transactions'
     v1.3 - added variable type hints across consumer methods
     v1.4 - added rewind_batch() to reset in-memory fetch positions on database persistence failures
+    v1.4.1 - pylance adherence modifications: added local consumer variable type narrowing and cleanup handling in start()
 """
 
 import os
@@ -79,14 +80,19 @@ class ApolloKafkaConsumer:
     """
     async def start(self) -> None:
         try:
-            if self._consumer is None:
+            consumer: AIOKafkaConsumer | None = self._consumer
+            if consumer is None:
                 try:
                     self.initialize()
-                    assert self._consumer is not None # check service.py for explanation of assert
-                    await self._consumer.start()
+                    consumer = self._consumer
+                    assert consumer is not None # check service.py for explanation of assert
+                    await consumer.start()
+                    self._consumer = consumer
                     logger.info(f"(Apollo) Kafka Consumer started successfully with bootstrap servers: {self.bootstrap_servers}")
                 except Exception as e:
                     logger.error(f"(Apollo) Error while starting Kafka Consumer: {e}")
+                    if consumer is not None:
+                        consumer = None
                     if self._consumer is not None: # in case of KafkaConnectionError where AIOKafkaConsumer instance is made but no connection succeed, it will also be stopped gracefully this time """
                         """
                             2026-09-13 18:44:05,372 [ERROR] Unclosed AIOKafkaConsumer consumer: <aiokafka.consumer.consumer.AIOKafkaConsumer object at 0x74c71e557bf0>

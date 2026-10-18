@@ -3,6 +3,7 @@
     v1.0 - unit tests for scraper concurrency, payload type classification, OCP event tuple collection, producer lifecycle, partial scraper failures, unexpected type filtering, and cancellation handling
     v1.1 - added TransactionGenerator async stream mocking, myr-transactions topic validation, and dedicated multi-event transaction streaming pipeline test
     v1.2 - added variable type hints across test cases and fixtures
+    v1.2.1 - added type: ignore annotation to TransactionPayload instantiation in test_main_transaction_generator_streaming
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -309,7 +310,7 @@ async def test_main_transaction_generator_streaming(sample_transaction_payload: 
         merchant_mcc="5311",
         payment_status="SUCCESS",
         is_flagged_fraud=False
-    )
+    ) # type: ignore # ingested_at is auto generated
 
     mock_playstore_run: AsyncMock = AsyncMock(return_value=[])
     mock_marketaux_run: AsyncMock = AsyncMock(return_value=[])
