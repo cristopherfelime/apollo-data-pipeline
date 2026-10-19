@@ -4,6 +4,7 @@
  v1.0.1 - added missing semicolon at the end of idx_staging_transactions_user_history lol
  v1.1 - some records were skipped because maximum allowable integer in a repetition bound is 255, not 256. fixed that in url regex
  v1.1.1 - changed \b to \y in chk_url_regex (PostgreSQL interprets \b as ASCII backspace 0x08; \y is the POSIX word boundary)
+ v1.2 - added pipeline_run_id column and lookup indexes across staging_reviews, staging_marketaux, and staging_transactions for Airflow lineage tracking and sensor queries
  */
 
 -- table schema for staging queue of play store reviews
@@ -17,6 +18,7 @@
     app_version: Annotated[str | None, Field(alias="appVersion", default=None)]
     submitted_at: Annotated[datetime, Field(alias="at")]
     ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))]
+    pipeline_run_id: Annotated[str | None, Field(default_factory=lambda: os.getenv("APOLLO_PIPELINE_RUN_ID"))]
 */
 CREATE TABLE IF NOT EXISTS staging_reviews (
     event_id UUID PRIMARY KEY,
@@ -28,6 +30,7 @@ CREATE TABLE IF NOT EXISTS staging_reviews (
     app_version VARCHAR(50), -- pydantic basemodel also allows it to be None
     submitted_at TIMESTAMPTZ NOT NULL, -- TIMESTAMPTZ standardizes to UTC i heard, so better than TIMESTAMP here
     ingested_at TIMESTAMPTZ NOT NULL, -- time when data was ingested (scraped to be exact)
+    pipeline_run_id VARCHAR(255), -- Airflow pipeline run ID for batch lineage tagging
     is_cleaned BOOLEAN NOT NULL DEFAULT FALSE, -- this one is particularly for artemis later
     is_embedded BOOLEAN NOT NULL DEFAULT FALSE, -- same as above
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- time when this message was pushed to the db
@@ -55,6 +58,7 @@ CREATE TABLE IF NOT EXISTS staging_reviews (
     sentiment_score: Annotated[float | None, Field(ge=-1.0, le=1.0)]
     published_at: Annotated[datetime, Field(description="exact UTC timestamp of when article was published")]
     ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))]
+    pipeline_run_id: Annotated[str | None, Field(default_factory=lambda: os.getenv("APOLLO_PIPELINE_RUN_ID"))]
 */
 CREATE TABLE IF NOT EXISTS staging_marketaux (
     event_id UUID PRIMARY KEY,
@@ -67,6 +71,7 @@ CREATE TABLE IF NOT EXISTS staging_marketaux (
     -- the rest of these are pretty much similar toabove
     published_at TIMESTAMPTZ NOT NULL,
     ingested_at TIMESTAMPTZ NOT NULL,
+    pipeline_run_id VARCHAR(255), -- Airflow pipeline run ID for batch lineage tagging
     is_cleaned BOOLEAN NOT NULL DEFAULT FALSE,
     is_embedded BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -97,6 +102,7 @@ CREATE TABLE IF NOT EXISTS staging_marketaux (
     merchant_mcc: Annotated[str, Field(max_length=4, pattern=r"^\d{4}$", description="merchant category code")]
     payment_status: Annotated[Literal["SUCCESS", "FAILED", "PENDING", "REVERSED"], Field(max_length=100)]
     ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))]
+    pipeline_run_id: Annotated[str | None, Field(default_factory=lambda: os.getenv("APOLLO_PIPELINE_RUN_ID"))]
     is_flagged_fraud: Annotated[bool, Field(description="boolean flag indicating if the transaction is flagged as fraud (ts primarily for artemis later)")]
 */
 CREATE TABLE IF NOT EXISTS staging_transactions (
@@ -109,6 +115,7 @@ CREATE TABLE IF NOT EXISTS staging_transactions (
     merchant_mcc VARCHAR(4) NOT NULL, -- mcc is 4 digits
     payment_status VARCHAR(100) NOT NULL,
     ingested_at TIMESTAMPTZ NOT NULL,
+    pipeline_run_id VARCHAR(255), -- Airflow pipeline run ID for batch lineage tagging
     is_flagged_fraud BOOLEAN NOT NULL,
     /* these two artemis flag might not actually be used for transactions as itll not be used for training later on, keeping in jic
     is_cleaned BOOLEAN NOT NULL DEFAULT FALSE,
@@ -168,3 +175,13 @@ WHERE is_flagged_fraud = TRUE;
 -- indexes for fast lookups of user's transaction history
 CREATE INDEX IF NOT EXISTS idx_staging_transactions_user_history
 ON staging_transactions("user_id", "timestamp" DESC);
+
+-- for Airflow persistence sensor and lineage filtering
+CREATE INDEX IF NOT EXISTS idx_staging_reviews_pipeline_run_id
+ON staging_reviews(pipeline_run_id);
+
+CREATE INDEX IF NOT EXISTS idx_staging_marketaux_pipeline_run_id
+ON staging_marketaux(pipeline_run_id);
+
+CREATE INDEX IF NOT EXISTS idx_staging_transactions_pipeline_run_id
+ON staging_transactions(pipeline_run_id);

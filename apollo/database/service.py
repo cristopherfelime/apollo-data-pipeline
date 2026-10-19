@@ -5,6 +5,7 @@
     v1.2 - added staging_transactions table bulk insert (sql_transactions) for 'myr-transactions' topic persistence
     v1.3 - added variable type hints across persister methods
     v1.3.1 - pylance adherence modifications: added local pool variable type narrowing and exception handling with graceful pool closure in start()
+    v1.4 - added pipeline_run_id column to staging_reviews, staging_marketaux, and staging_transactions insert statements and default fallback in parse_events()
 """
 
 import os
@@ -186,6 +187,7 @@ class PostgresPersister:
                         logger.warning(f"(Apollo) Found an empty event record, skipping")
                         continue
                     event_data: dict[str, Any] = orjson.loads(event.value) # so we deserialze each event, getting their metadata and data
+                    event_data.setdefault("pipeline_run_id", None) # fallback to None if legacy/unversioned event to prevent KeyError in executemany
                     parse_result.setdefault(event.topic, []).append(event_data) # appends it to its corresponding topic, creating a new key topic and its list if not exist, similar thing in ApolloKafkaProducer as well happened in _prepare_payload() go check it out
                 except CancelledError:
                     logger.info(f"(Apollo) Postgres persister parse_events() inside consumer loop was running, then was stopped by the user (KeyboardInterrupt)")
@@ -228,10 +230,11 @@ class PostgresPersister:
                                 rating, 
                                 app_version, 
                                 submitted_at, 
-                                ingested_at
+                                ingested_at,
+                                pipeline_run_id
                             )
                             VALUES
-                                (%(event_id)s, %(app_id)s, %(app_name)s, %(user_name)s, %(review_text)s, %(rating)s, %(app_version)s, %(submitted_at)s, %(ingested_at)s)
+                                (%(event_id)s, %(app_id)s, %(app_name)s, %(user_name)s, %(review_text)s, %(rating)s, %(app_version)s, %(submitted_at)s, %(ingested_at)s, %(pipeline_run_id)s)
                             ON CONFLICT (event_id)
                             DO NOTHING;
                         """ # one cool thing, these parametrized insert on the values u can pass in the key names to get their values when you passed in a mapping (dict) in executemany, if not (order based on the positional values) you get index based position in tuple instead. look down below
@@ -245,10 +248,11 @@ class PostgresPersister:
                                 source, 
                                 sentiment_score, 
                                 published_at, 
-                                ingested_at
+                                ingested_at,
+                                pipeline_run_id
                             )
                             VALUES
-                                (%(event_id)s, %(article_uuid)s, %(title)s, %(snippet)s, %(url)s, %(source)s, %(sentiment_score)s, %(published_at)s, %(ingested_at)s)
+                                (%(event_id)s, %(article_uuid)s, %(title)s, %(snippet)s, %(url)s, %(source)s, %(sentiment_score)s, %(published_at)s, %(ingested_at)s, %(pipeline_run_id)s)
                             ON CONFLICT (event_id)
                             DO NOTHING;
                         """ # ON CONFLICT (event_id) DO NOTHING guarantees kafka's at-least-once delivery behavior, implementing idempotency so if a kafka commit fails, it may retry reinserting the same events, but since the on conflict statement it won't do anything (no creating duplicate entry nor throwing any error on the database side)
@@ -263,10 +267,11 @@ class PostgresPersister:
                                 merchant_mcc,
                                 payment_status,
                                 ingested_at,
-                                is_flagged_fraud
+                                is_flagged_fraud,
+                                pipeline_run_id
                             )
                             VALUES
-                                (%(transaction_id)s, %(timestamp)s, %(transaction_method)s, %(amount_myr)s, %(user_id)s, %(merchant_name)s, %(merchant_mcc)s, %(payment_status)s, %(ingested_at)s, %(is_flagged_fraud)s)
+                                (%(transaction_id)s, %(timestamp)s, %(transaction_method)s, %(amount_myr)s, %(user_id)s, %(merchant_name)s, %(merchant_mcc)s, %(payment_status)s, %(ingested_at)s, %(is_flagged_fraud)s, %(pipeline_run_id)s)
                             ON CONFLICT (transaction_id)
                             DO NOTHING;
                         """

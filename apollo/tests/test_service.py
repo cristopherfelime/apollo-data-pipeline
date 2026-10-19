@@ -3,6 +3,7 @@
     v1.0 - completed unit test coverage for connection pool lifecycle, conninfo, parsing, and atomic batch persistence
     v1.1 - added synthetic TransactionPayload fixture, ConsumerRecord streaming, and staging_transactions batch persistence assertions
     v1.2 - added variable type hints across test cases and fixtures
+    v1.2.1 - added pipeline_run_id to synthetic event fixtures, verified pipeline_run_id in persistence assertions, and added legacy Kafka payload fallback test
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
@@ -42,7 +43,8 @@ def sample_review_event() -> dict[str, Any]:
         "review_text": "Great UI and instant transfers with no hidden fees!",
         "app_version": "1.4.2",
         "submitted_at": "2026-08-10T14:30:00Z",
-        "ingested_at": "2026-08-10T14:35:00Z"
+        "ingested_at": "2026-08-10T14:35:00Z",
+        "pipeline_run_id": "test_pipeline_run_123"
     }
 
 @pytest.fixture
@@ -57,7 +59,8 @@ def sample_news_event() -> dict[str, Any]:
         "source": "thestar.com.my",
         "sentiment_score": 0.456,
         "published_at": "2026-08-01T10:30:00Z",
-        "ingested_at": "2026-08-01T10:35:00Z"
+        "ingested_at": "2026-08-01T10:35:00Z",
+        "pipeline_run_id": "test_pipeline_run_123"
     }
 
 @pytest.fixture
@@ -73,7 +76,8 @@ def sample_transaction_event() -> dict[str, Any]:
         "merchant_mcc": "5331",
         "payment_status": "SUCCESS",
         "ingested_at": "2026-09-24T18:30:05Z",
-        "is_flagged_fraud": False
+        "is_flagged_fraud": False,
+        "pipeline_run_id": "test_pipeline_run_123"
     }
 
 @pytest.fixture
@@ -422,6 +426,16 @@ def test_postgres_persister_parse_events(sample_consumer_records: list[ConsumerR
     result: dict[str, list[dict[str, Any]]] = default_persister.parse_events(sample_consumer_records)
     assert result == sample_parsed_events # they should be the same
 
+    # verify backward compatibility when legacy Kafka payloads lack 'pipeline_run_id'
+    legacy_payload: bytes = orjson.dumps({"event_id": "legacy-1", "app_id": "my.com.gxbank.app"})
+    legacy_record: ConsumerRecord = ConsumerRecord(
+        topic="app-reviews-events", partition=0, offset=999, timestamp=1787119344000,
+        timestamp_type=0, key=b"my.com.gxbank.app", value=legacy_payload, checksum=None,
+        serialized_key_size=17, serialized_value_size=len(legacy_payload), headers=()
+    )
+    legacy_parsed: dict[str, list[dict[str, Any]]] = default_persister.parse_events([legacy_record])
+    assert legacy_parsed["app-reviews-events"][0]["pipeline_run_id"] is None
+
 """
     PARSING TEST (ERROR HANDLING: MALFORMED DATA)
     tests PostgresPersister.parse_events() error handling on malformed ConsumerRecord
@@ -483,6 +497,8 @@ async def test_postgres_persister_persist_events(mock_async_pool: tuple[MagicMoc
         assert "INSERT INTO staging_reviews" in review_sql # check if the sql insertion query is proper
         assert "ON CONFLICT (event_id)" in review_sql
         assert "DO NOTHING" in review_sql
+        assert "pipeline_run_id" in review_sql
+        assert "%(pipeline_run_id)s" in review_sql
         assert review_records == sample_parsed_events["app-reviews-events"] # check if the records are correct
 
         # checking the second call (which is news)
@@ -492,6 +508,8 @@ async def test_postgres_persister_persist_events(mock_async_pool: tuple[MagicMoc
         assert "INSERT INTO staging_marketaux" in news_sql # check if the sql insertion query is proper
         assert "ON CONFLICT (event_id)" in news_sql
         assert "DO NOTHING" in news_sql
+        assert "pipeline_run_id" in news_sql
+        assert "%(pipeline_run_id)s" in news_sql
         assert news_records == sample_parsed_events["market-news-events"] # check if the records are correct
 
         # checking the third call (which is transactions)
@@ -501,6 +519,8 @@ async def test_postgres_persister_persist_events(mock_async_pool: tuple[MagicMoc
         assert "INSERT INTO staging_transactions" in tx_sql # check if the sql insertion query is proper
         assert "ON CONFLICT (transaction_id)" in tx_sql
         assert "DO NOTHING" in tx_sql
+        assert "pipeline_run_id" in tx_sql
+        assert "%(pipeline_run_id)s" in tx_sql
         assert tx_records == sample_parsed_events["myr-transactions"] # check if the records are correct
 
         # finally stop the postgres persister instance

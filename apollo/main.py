@@ -5,11 +5,14 @@
 		v1.2 - integrated TransactionGenerator to generate and stream synthetic Malaysian banking transactions to Kafka topic 'myr-transactions' partitioned by user_id
 		v1.3 - added variable type hints across orchestrator pipeline
         v1.3.1 - nonono delay in stream_transactions() now
+        v1.4 - integrated APOLLO_PIPELINE_RUN_ID environment variable logging, single-line JSON emission of producer_results to stdout for Airflow BashOperator XCom capture, and non-zero exit code propagation on unexpected exceptions
 """
 
 import logging
 import asyncio
 import os
+import sys
+import orjson
 import itertools # just for flattening the results list
 from dotenv import load_dotenv
 from typing import Sequence
@@ -34,6 +37,10 @@ load_dotenv()
 """
 async def main() -> None:
     try:
+        pipeline_run_id: str | None = os.getenv("APOLLO_PIPELINE_RUN_ID") # if APOLLO_PIPELINE_RUN_ID is expected to not be found when run manually so None is also accepted, this variable is intended to be injected from Airflow's BashOperator() env parameter
+        if pipeline_run_id:
+            logger.info(f"(Apollo) main orchestrator started with pipeline_run_id: {pipeline_run_id}") # indicator that it is running on our Airflow DAG
+
         # some arguments for the individual scrapers
         playstore_app_dict: dict[str, str] = {
                         "my.com.gxbank.app": "GX Bank",
@@ -85,6 +92,10 @@ async def main() -> None:
         
         logger.info(f"(Apollo) Successfully processed play store reviews, marketaux news, and synthetic transactions, and sent all data to Kafka, entire operation was successful:\n {producer_results}")
 
+        if producer_results is not None:
+            sys.stdout.write(orjson.dumps(producer_results).decode("utf-8") + "\n") # BashOperator(do_xcom_push=True) should capture the intended producer_results as JSON dictionary dump, decode is needed as orjson returns binary stream by default
+            sys.stdout.flush() # flush python's memory buffer to avoid any unnecessary output cutout due to how python memory buffer works
+
         # print("Result of results: ") # test
         # print(results)
     except CancelledError:
@@ -93,7 +104,7 @@ async def main() -> None:
         return
     except Exception as e:
         logger.error(f"(Apollo) main orchestrator unexpected error while running Apollo: {e}")
-        return
+        raise
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -111,3 +122,4 @@ if __name__ == "__main__":
         logger.info("Apollo (main orchestrator) was stopped by the user (KeyboardInterrupt)")
     except Exception as e:
         logger.error(f"Apollo (main orchestrator) failed to run: {e}")
+        sys.exit(1) # means fail btw

@@ -6,9 +6,11 @@
     v1.2 - added boundary and invalidation tests for review_text length, news title and snippet limits, invalid timestamp string, non-UUID user_id, merchant_name max length, minimum valid amount_myr boundary, and is_flagged_fraud
     v1.3 - added variable type hints across test cases and fixtures
     v1.3.1 - added type: ignore comments across model instantiations for Pylance missing arguments adherence
+    v1.4 - added validation tests for pipeline_run_id across ReviewPayload, FinancialNewsPayload, and TransactionPayload
     NOTE: SOME PARTS ARE AI ASSISTED
 """
 
+import os
 import pytest
 from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
@@ -701,6 +703,84 @@ def test_transaction_payload_invalid_fraud_flag() -> None:
             payment_status="SUCCESS",
             is_flagged_fraud="not_a_boolean" # invalid boolean
         ) # type: ignore
+
+"""
+    AIRFLOW TRACKING TEST
+    tests pipeline_run_id default None and environment variable capture across all payload models
+"""
+def test_payloads_pipeline_run_id_default_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # unset environment variable: should default to None
+    monkeypatch.delenv("APOLLO_PIPELINE_RUN_ID", raising=False)
+
+    review_none = ReviewPayload(
+        app_id="my.com.gxbank.app",
+        app_name="GX Bank",
+        user_name="Alice Tan",
+        review_text="Clean app",
+        rating=5,
+        submitted_at=datetime.now(timezone.utc)
+    ) # type: ignore
+    assert review_none.pipeline_run_id is None
+
+    news_none = FinancialNewsPayload(
+        article_uuid="news-uuid-1",
+        title="Sample News",
+        snippet="Snippet text",
+        url="https://thestar.com.my/business/test",
+        source="thestar.com.my",
+        sentiment_score=0.2,
+        published_at=datetime.now(timezone.utc)
+    ) # type: ignore
+    assert news_none.pipeline_run_id is None
+
+    tx_none = TransactionPayload(
+        timestamp=datetime.now(timezone.utc),
+        transaction_method="DUITNOW_QR",
+        amount_myr=Decimal("50.00"),
+        user_id=uuid4(),
+        merchant_name="99 Speedmart",
+        merchant_mcc="5411",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    ) # type: ignore
+    assert tx_none.pipeline_run_id is None
+
+    # set environment variable: should auto-populate
+    test_run_id: str = "manual__2026-10-19T06:00:00+00:00"
+    monkeypatch.setenv("APOLLO_PIPELINE_RUN_ID", test_run_id)
+
+    review_env = ReviewPayload(
+        app_id="my.com.gxbank.app",
+        app_name="GX Bank",
+        user_name="Alice Tan",
+        review_text="Clean app",
+        rating=5,
+        submitted_at=datetime.now(timezone.utc)
+    ) # type: ignore
+    assert review_env.pipeline_run_id == test_run_id
+
+    news_env = FinancialNewsPayload(
+        article_uuid="news-uuid-2",
+        title="Sample News 2",
+        snippet="Snippet text 2",
+        url="https://thestar.com.my/business/test-2",
+        source="thestar.com.my",
+        sentiment_score=0.2,
+        published_at=datetime.now(timezone.utc)
+    ) # type: ignore
+    assert news_env.pipeline_run_id == test_run_id
+
+    tx_env = TransactionPayload(
+        timestamp=datetime.now(timezone.utc),
+        transaction_method="DUITNOW_QR",
+        amount_myr=Decimal("50.00"),
+        user_id=uuid4(),
+        merchant_name="99 Speedmart",
+        merchant_mcc="5411",
+        payment_status="SUCCESS",
+        is_flagged_fraud=False
+    ) # type: ignore
+    assert tx_env.pipeline_run_id == test_run_id
 
 # ----------------------------------------------------------------------------------------------------------------------------------------------------------
 

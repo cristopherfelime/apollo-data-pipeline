@@ -7,8 +7,10 @@
         v1.3.3 - cleaned up TransactionPayload model_config (no aliases needed), updated outdated comments regarding native Pydantic v2 ISO 8601 parsing
         v1.4 - added variable type hints across field validators
         v1.4.1 - aligned FinancialNewsPayload url repetition bound to 255 (PostgreSQL DUPMAX and RFC domain limit) and noted \b (Python PCRE) vs \\y (PostgreSQL POSIX) dialect difference
+        v1.5 - added optional pipeline_run_id field across ReviewPayload, FinancialNewsPayload, and TransactionPayload defaulting to APOLLO_PIPELINE_RUN_ID environment variable for Airflow batch tracking
 """
 
+import os
 import re # re is used for regular expressions, which is used for cleaning review text down below (re.sub())
 from uuid import UUID, uuid4 # uuid4 is used for auto-generating unique identifiers
 from datetime import datetime, timezone # datetime is used for handling date and time, timezone is used for handling timezones
@@ -36,6 +38,7 @@ HTML_REGEX_CLEANER = re.compile(r"<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6})
         app_version (str | None): application version at the time of review (alias: appVersion)
         submitted_at (datetime): timestamp of when review was posted in UTC (alias: at)
         ingested_at (datetime): UTC timestamp of when review was ingested into pipeline
+        pipeline_run_id (str | None): Airflow pipeline run ID for batch tracking
     methods:
         clean_review_text -> field validator that cleans html tags and whitespace from review text before validation
         convert_datetime_submitted_at -> field validator that standardizes submitted_at datetime to UTC timezone
@@ -61,6 +64,7 @@ class ReviewPayload(BaseModel): # a class inherits Pydantic's BaseModel to autom
     app_version: Annotated[str | None, Field(alias="appVersion", default=None)] # app version at time of review, can be empty
     submitted_at: Annotated[datetime, Field(alias="at")] # when the review was submitted
     ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))] # when the review was ingested into the data pipeline, leave it empty and default_factory will automatically produce the current datetime in utc from the time the model was initialized
+    pipeline_run_id: Annotated[str | None, Field(default_factory=lambda: os.getenv("APOLLO_PIPELINE_RUN_ID"))] # optional pipeline run ID for Airflow DAG tracking
 
     """
         field validator for review_text, mainly to clean them from unnecessary HTML tags before type validation
@@ -104,6 +108,7 @@ class ReviewPayload(BaseModel): # a class inherits Pydantic's BaseModel to autom
         sentiment_score (float | None): sentiment polarity score between -1.0 and 1.0
         published_at (datetime): original article published timestamp in UTC
         ingested_at (datetime): UTC timestamp of when article was ingested into pipeline
+        pipeline_run_id (str | None): Airflow pipeline run ID for batch tracking
     methods:
         clean_news_text -> field validator that cleans html tags and whitespace from article title and snippet before validation
 """
@@ -124,6 +129,7 @@ class FinancialNewsPayload(BaseModel):
     sentiment_score: Annotated[float | None, Field(ge=-1.0, le=1.0)] # news sentiment score is between -1 and 1, heard that sometimes its not provided so None is allowed
     published_at: Annotated[datetime, Field(description="exact UTC timestamp of when article was published")] # original article published timestamp, pydantic v2 natively parses ISO 8601 strings into datetime objects
     ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))] # when the article news payload was ingested into data pipeline
+    pipeline_run_id: Annotated[str | None, Field(default_factory=lambda: os.getenv("APOLLO_PIPELINE_RUN_ID"))] # optional pipeline run ID for Airflow DAG tracking
     
     # might as well use the previos html tags cleaner regex again to clean up title and snippet as well
     """
@@ -154,6 +160,7 @@ class FinancialNewsPayload(BaseModel):
         merchant_mcc (str): 4-digit ISO 18245 merchant category code
         payment_status (str): transaction payment status as of logging (SUCCESS, FAILED, PENDING, REVERSED)
         ingested_at (datetime): UTC timestamp of when transaction was ingested into pipeline
+        pipeline_run_id (str | None): Airflow pipeline run ID for batch tracking
         is_flagged_fraud (bool): preliminary boolean flag indicating if the transaction is flagged as fraud, important for Artemis
     methods:
         verify_and_convert_timestamp -> field validator that standardizes timestamp datetime to UTC timezone
@@ -175,6 +182,7 @@ class TransactionPayload(BaseModel):
     merchant_mcc: Annotated[str, Field(max_length=4, pattern=r"^\d{4}$", description="merchant category code")] # merchant category code has 4 digits 
     payment_status: Annotated[Literal["SUCCESS", "FAILED", "PENDING", "REVERSED"], Field(max_length=100)] # transaction payment status as of logging
     ingested_at: Annotated[datetime, Field(default_factory=lambda: datetime.now(timezone.utc))]
+    pipeline_run_id: Annotated[str | None, Field(default_factory=lambda: os.getenv("APOLLO_PIPELINE_RUN_ID"))] # optional pipeline run ID for Airflow DAG tracking
     is_flagged_fraud: Annotated[bool, Field(description="boolean flag indicating if the transaction is flagged as fraud (ts primarily for artemis later)")]
 
     """
