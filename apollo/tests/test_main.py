@@ -44,7 +44,7 @@ def sample_review_payload() -> ReviewPayload:
         app_version="1.4.2",
         submitted_at=datetime(2026, 8, 10, 14, 30, tzinfo=timezone.utc),
         ingested_at=datetime(2026, 8, 10, 14, 35, tzinfo=timezone.utc)
-    )
+    ) # type: ignore
 
 @pytest.fixture
 def sample_news_payload() -> FinancialNewsPayload:
@@ -59,7 +59,7 @@ def sample_news_payload() -> FinancialNewsPayload:
         sentiment_score=0.456,
         published_at=datetime(2026, 8, 1, 10, 30, tzinfo=timezone.utc),
         ingested_at=datetime(2026, 8, 1, 10, 35, tzinfo=timezone.utc)
-    )
+    ) # type: ignore
 
 @pytest.fixture
 def sample_transaction_payload() -> TransactionPayload:
@@ -75,7 +75,7 @@ def sample_transaction_payload() -> TransactionPayload:
         payment_status="SUCCESS",
         ingested_at=datetime(2026, 9, 20, 14, 35, tzinfo=timezone.utc),
         is_flagged_fraud=False
-    )
+    ) # type: ignore
 
 @pytest.fixture
 def sample_producer_results() -> dict[str, int]:
@@ -289,8 +289,9 @@ async def test_main_unexpected_exception_handling(sample_review_payload: ReviewP
          patch.object(MarketauxScraper, "run", mock_marketaux_run), \
          patch.object(TransactionGenerator, "stream_transactions", side_effect=mock_empty_stream), \
          patch("apollo.main.ApolloKafkaProducer", side_effect=Exception("Fatal Kafka broker connection failure")):
-        
-        await main() # should catch the top-level exception and return cleanly
+
+        with pytest.raises(Exception, match="Fatal Kafka broker connection failure"):
+            await main() # should catch the top-level exception and return cleanly
 
 """
     PIPELINE TEST
