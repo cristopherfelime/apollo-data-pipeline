@@ -21,6 +21,11 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
+    healthcheck: # healthcheck to let postgres fully initialize first before any dependent containers/services (like airflow-init for example) runs. add this to depends_on db on any dependent container
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"] # on their command shell, run pg_isready for check
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # apache kafka container
   kafka:
